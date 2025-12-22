@@ -35,6 +35,7 @@ const generateId = (pattern: string, index: number): string => {
 };
 
 const getRandom = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
+const getRandomInt = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1)) + min;
 
 const generateDate = (type: 'random' | 'future', referenceDateStr?: string) => {
    const now = new Date();
@@ -103,7 +104,7 @@ const getGenerationOrder = (tables: Table[], relationships: Relationship[]): Tab
 export const generateAndDownload = async (
   tables: Table[],
   relationships: Relationship[],
-  rowCount: number,
+  globalRowCount: number, // Ignored now, using table settings
   onProgress: (msg: string) => void
 ) => {
   const zip = new JSZip();
@@ -129,18 +130,70 @@ export const generateAndDownload = async (
       fkMap.set(r.sourceColumnId, { parentTableId: r.targetTableId, parentColId: r.targetColumnId });
     });
 
+    // DETERMINE TARGET ROWS and DRIVING PARENT
+    let targetRows = 0;
+    const settings = table.genSettings || { mode: 'fixed', fixedCount: 100 };
+    const drivingParentId = settings.mode === 'per_parent' ? settings.drivingParentTableId : undefined;
+    
+    // Get driving parent IDs if per_parent mode
+    let drivingParentIds: string[] = [];
+    if (settings.mode === 'per_parent' && drivingParentId) {
+       // Find the PK column of the parent (assumed linked via relationship)
+       // Actually, we just need ANY valid ID from the parent's generated set.
+       // Usually we look up the column used in the relationship.
+       const rel = relationships.find(r => r.sourceTableId === table.id && r.targetTableId === drivingParentId);
+       if (rel && generatedDataStore[drivingParentId]?.[rel.targetColumnId]) {
+         drivingParentIds = generatedDataStore[drivingParentId][rel.targetColumnId];
+       } else {
+         // Fallback if relation not found (shouldn't happen if UI filters correctly) or parent has no data
+         console.warn(`Driving parent data not found for ${table.name}`);
+         settings.mode = 'fixed';
+         settings.fixedCount = 10;
+       }
+    }
+
+    // Determine Pre-calculated Row Count for AI Batching
+    if (settings.mode === 'fixed') {
+      targetRows = settings.fixedCount || 100;
+    } else {
+      // For per_parent, we estimate max needed (lazy approach: just generate batch by batch? No, AI needs batch)
+      // Let's calculate exact total needed first
+      targetRows = 0; // Will be derived during loop
+    }
+    
+    // If per_parent, we need to construct the loop structure first to know total rows for AI prompt
+    interface GenerationJob {
+       drivingId?: string; // The ID of the parent if per_parent
+       count: number;
+    }
+    const jobs: GenerationJob[] = [];
+
+    if (settings.mode === 'per_parent') {
+       drivingParentIds.forEach(pid => {
+          const count = getRandomInt(settings.minPerParent ?? 1, settings.maxPerParent ?? 5);
+          if (count > 0) {
+            jobs.push({ drivingId: pid, count });
+            targetRows += count;
+          }
+       });
+    } else {
+       jobs.push({ count: targetRows });
+    }
+
     // 2. Pre-fetch AI content
     const aiColumns = table.columns.filter(c => c.rule.type === GenerationStrategyType.AI);
     const aiCache: Record<string, string[]> = {};
     
-    await Promise.all(aiColumns.map(async (col) => {
-      onProgress(`Generating AI content for ${table.name}.${col.name}...`);
-      const prompt = col.rule.config?.aiPrompt || "Generate random values";
-      aiCache[col.id] = await generateSyntheticDataBatch(prompt, rowCount, col.sampleValues);
-    }));
+    if (targetRows > 0) {
+      await Promise.all(aiColumns.map(async (col) => {
+        onProgress(`Generating AI content for ${table.name}.${col.name} (${targetRows} items)...`);
+        const prompt = col.rule.config?.aiPrompt || "Generate random values";
+        // AI Batching: 5000 max? simple implementation
+        aiCache[col.id] = await generateSyntheticDataBatch(prompt, targetRows, col.sampleValues);
+      }));
+    }
 
     // 3. Sort columns to ensure Dependencies (Dates) are handled correctly
-    // We want "created"/"originated" BEFORE "modified"/"updated"
     const sortedColumns = [...table.columns].sort((a, b) => {
        const aName = a.name.toLowerCase();
        const bName = b.name.toLowerCase();
@@ -150,84 +203,96 @@ export const generateAndDownload = async (
     });
 
     // 4. Generate Rows
-    for (let i = 0; i < rowCount; i++) {
-      for (const col of sortedColumns) {
-        // FK Logic
-        if (fkMap.has(col.id)) {
-          const { parentTableId, parentColId } = fkMap.get(col.id)!;
-          const parentValues = generatedDataStore[parentTableId]?.[parentColId];
-          
-          if (parentValues && parentValues.length > 0) {
-            tableData[col.id].push(getRandom(parentValues));
-          } else {
-             tableData[col.id].push("ORPHAN"); 
-          }
-          continue;
-        }
+    let globalRowIndex = 0;
 
-        // Special Date Logic (Time-Arrow)
-        if (col.type === DataType.DATE) {
-          const lowerName = col.name.toLowerCase();
-          if (lowerName.includes('modified') || lowerName.includes('updated')) {
-            // Find a previous date field in THIS row
-            // We can look at tableData keys that are already populated
-            const createdCol = table.columns.find(c => 
-              (c.name.toLowerCase().includes('created') || c.name.toLowerCase().includes('originated')) 
-              && tableData[c.id][i] // Ensure it has a value for this row
-            );
+    for (const job of jobs) {
+       for (let k = 0; k < job.count; k++) {
+          for (const col of sortedColumns) {
+            // Check if this column is the FK to the Driving Parent
+            const fkInfo = fkMap.get(col.id);
             
-            if (createdCol) {
-               tableData[col.id].push(generateDate('future', tableData[createdCol.id][i]));
-            } else {
-               tableData[col.id].push(generateDate('random'));
-            }
-          } else {
-            tableData[col.id].push(generateDate('random'));
-          }
-          continue;
-        }
+            if (fkInfo) {
+              // Is this the driving parent?
+              if (settings.mode === 'per_parent' && fkInfo.parentTableId === drivingParentId) {
+                 tableData[col.id].push(job.drivingId || "ERROR");
+                 continue;
+              }
 
-        let val = "";
-        // Normal Generation
-        switch (col.rule.type) {
-          case GenerationStrategyType.COPY:
-            val = col.sampleValues[i % col.sampleValues.length] || "";
-            break;
-          case GenerationStrategyType.PATTERN:
-            val = generateId(col.rule.config?.pattern || "ID-#", i + 1);
-            break;
-          case GenerationStrategyType.RANDOM:
-            // Explicit dropdown handling matches RANDOM logic
-            const opts = col.rule.config?.options || ["A", "B", "C"];
-            if (col.isMultiValue) {
-               // Pick 1-3 unique options
-               const count = Math.floor(Math.random() * 3) + 1;
-               const selected = [];
-               for(let k=0; k<count; k++) selected.push(getRandom(opts));
-               // De-duplicate
-               const uniqueSelected = Array.from(new Set(selected));
-               val = uniqueSelected.join(col.rule.config?.delimiter || ',');
-            } else {
-               val = getRandom(opts);
+              // Normal FK logic (Random assignment from other parents)
+              const parentValues = generatedDataStore[fkInfo.parentTableId]?.[fkInfo.parentColId];
+              if (parentValues && parentValues.length > 0) {
+                tableData[col.id].push(getRandom(parentValues));
+              } else {
+                 tableData[col.id].push("ORPHAN"); 
+              }
+              continue;
             }
-            break;
-          case GenerationStrategyType.AI:
-            val = aiCache[col.id][i] || "";
-            break;
-          default:
-            val = "";
-        }
-        tableData[col.id].push(val);
-      }
+
+            // Special Date Logic (Time-Arrow)
+            if (col.type === DataType.DATE) {
+              const lowerName = col.name.toLowerCase();
+              if (lowerName.includes('modified') || lowerName.includes('updated')) {
+                const createdCol = table.columns.find(c => 
+                  (c.name.toLowerCase().includes('created') || c.name.toLowerCase().includes('originated')) 
+                  && tableData[c.id][tableData[c.id].length] // This index is tricky, we push to array. Length is current index
+                );
+                // Actually we just pushed to tableData[col.id], so index is length-1
+                // Wait, we haven't pushed 'this' col yet.
+                // We need the value from the createdCol at the SAME index.
+                const currentIndex = tableData[col.id].length; 
+                const createdVal = createdCol ? tableData[createdCol.id][currentIndex] : null;
+
+                if (createdVal) {
+                   tableData[col.id].push(generateDate('future', createdVal));
+                } else {
+                   tableData[col.id].push(generateDate('random'));
+                }
+              } else {
+                tableData[col.id].push(generateDate('random'));
+              }
+              continue;
+            }
+
+            let val = "";
+            switch (col.rule.type) {
+              case GenerationStrategyType.COPY:
+                val = col.sampleValues[globalRowIndex % col.sampleValues.length] || "";
+                break;
+              case GenerationStrategyType.PATTERN:
+                val = generateId(col.rule.config?.pattern || "ID-#", globalRowIndex + 1);
+                break;
+              case GenerationStrategyType.RANDOM:
+                const opts = col.rule.config?.options || ["A", "B", "C"];
+                if (col.isMultiValue) {
+                   const count = Math.floor(Math.random() * 3) + 1;
+                   const selected = [];
+                   for(let m=0; m<count; m++) selected.push(getRandom(opts));
+                   const uniqueSelected = Array.from(new Set(selected));
+                   val = uniqueSelected.join(col.rule.config?.delimiter || ',');
+                } else {
+                   val = getRandom(opts);
+                }
+                break;
+              case GenerationStrategyType.AI:
+                val = aiCache[col.id][globalRowIndex] || "";
+                break;
+              default:
+                val = "";
+            }
+            tableData[col.id].push(val);
+          }
+          globalRowIndex++;
+       }
     }
 
     generatedDataStore[table.id] = tableData;
 
     // Convert to CSV
-    // Ensure we write columns in original order, not sorted order
+    // Ensure we write columns in original order
     const csvHeader = table.columns.map(c => `"${c.name}"`).join(",");
+    const finalRowCount = tableData[table.columns[0].id].length;
     const csvRows = [];
-    for (let i = 0; i < rowCount; i++) {
+    for (let i = 0; i < finalRowCount; i++) {
       const row = table.columns.map(c => `"${(generatedDataStore[table.id][c.id][i] || "").replace(/"/g, '""')}"`).join(",");
       csvRows.push(row);
     }
@@ -237,9 +302,7 @@ export const generateAndDownload = async (
 
   onProgress("Zipping files...");
   
-  // Safe extraction of saveAs for browser ESM environments
   const saveAsFunc = (FileSaver as any).saveAs || (FileSaver as any).default || FileSaver;
-  
   const content = await zip.generateAsync({ type: "blob" });
   saveAsFunc(content, "synthetic_data.zip");
   onProgress("Done!");

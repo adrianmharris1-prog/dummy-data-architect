@@ -20,13 +20,15 @@ export const generateSyntheticDataBatch = async (
 
   const systemInstruction = `
     STRICT CONSTRAINTS:
-    1. ID PATTERNS: Analyze 'id' and 'physicalid' columns in provided samples. Identify exact alphanumeric patterns (e.g., "ABC.12345-001"). Generate new, unique IDs following this EXACT format.
-    2. RELATIONAL INTEGRITY: If generating Foreign Keys, ensure they match the format of the Parent IDs.
-    3. DATA TYPES: 
-       - Dates: Generate ISO-8601 timestamps. Ensure logical flow (modified >= originated).
-       - Owners/Names: Use realistic corporate usernames or names consistent with reference styles.
-    4. CREATIVE FIELDS: When strategy is "Be Creative", generate professional-grade descriptions (e.g. for aerospace: "stress analysis", "composite layup", "tolerance deviation"). Avoid generic "lorem ipsum".
-    5. NO HALLUCINATION: If a column is defined as "Random (Dropdown)", do NOT introduce new values outside user-defined lists or provided samples.
+    1. ID PATTERNS: Analyze the 'id' and 'physicalid' columns in the provided samples. Identify the exact alphanumeric pattern (e.g., "ABC.12345-001" or "UUID-style"). Generate new, unique IDs that follow this EXACT format.
+    2. RELATIONAL INTEGRITY: If Table A (Parent) and Table B (Child) are linked by an ID:
+       - First, generate the specified number of rows for Table A.
+       - Second, use only the IDs generated in Table A to populate the Foreign Key column in Table B.
+    3. DATA TYPES:
+       - 'originated' / 'modified': Generate ISO-8601 timestamps. Ensure 'modified' is always >= 'originated'.
+       - 'owner' / 'name': Use the list of names provided in the 'Person' file or create realistic corporate usernames (e.g., jsmith, ddoe).
+    4. CREATIVE FIELDS: When the strategy is "Be Creative", generate professional-grade aerospace engineering descriptions. Avoid generic "lorem ipsum." Use terms like "stress analysis," "composite layup," "FEA results," and "tolerance deviation."
+    5. NO HALLUCINATION: If a column is defined as "Random (Dropdown)," do not introduce new values outside of the user-defined selection list.
 
     You are a synthetic data generator. 
     Your task is to generate realistic, diverse, professional-grade, and contextually appropriate data based on a user's column description.

@@ -25,6 +25,14 @@ export interface GenerationRule {
   };
 }
 
+export interface TableGenerationSettings {
+  mode: 'fixed' | 'per_parent';
+  fixedCount: number; // Used if mode is 'fixed'
+  minPerParent?: number; // Used if mode is 'per_parent'
+  maxPerParent?: number; // Used if mode is 'per_parent'
+  drivingParentTableId?: string; // The parent table that dictates the loop
+}
+
 export interface Column {
   id: string;
   name: string;
@@ -38,8 +46,19 @@ export interface Table {
   id: string;
   name: string;
   columns: Column[];
-  rowCount: number; // Original row count
+  rowCount: number; // Legacy default
+  genSettings?: TableGenerationSettings; // New configuration
+  ui?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    scrollPos?: number; // Internal table scroll persistence
+    isVisible?: boolean; // Whether table is on canvas or in sidebar
+  };
 }
+
+export type Cardinality = '1:1' | '1:N' | 'N:M';
 
 export interface Relationship {
   id: string;
@@ -47,9 +66,19 @@ export interface Relationship {
   sourceColumnId: string;
   targetTableId: string;
   targetColumnId: string;
+  cardinality: Cardinality;
 }
 
 export interface ProjectState {
   tables: Table[];
   relationships: Relationship[];
+  canvasScroll?: { x: number; y: number }; // Added for main canvas scroll persistence
+}
+
+export interface Project {
+  id: string;
+  name: string;
+  lastModified: number;
+  state: ProjectState;
+  currentStep: number;
 }
