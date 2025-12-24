@@ -24,7 +24,7 @@ const Navbar = ({
   step: number, 
   projectName: string, 
   onBack: () => void, 
-  onSave: () => void,
+  onSave: () => void, 
   onStepChange: (step: number) => void,
   canNavigate: boolean
 }) => {
@@ -376,7 +376,7 @@ const RelationshipMapper = ({
   onAddRelationship, 
   onRemoveRelationship, 
   onUpdateRelationship,
-  onUpdateTable,
+  onUpdateTables, // Changed from single table update to plural
   onUpdateCanvasScroll
 }: { 
   tables: Table[], 
@@ -386,7 +386,7 @@ const RelationshipMapper = ({
   onAddRelationship: (r: Relationship) => void,
   onRemoveRelationship: (id: string) => void,
   onUpdateRelationship: (r: Relationship) => void,
-  onUpdateTable: (t: Table) => void,
+  onUpdateTables: (tables: Table[]) => void, // Batch update interface
   onUpdateCanvasScroll: (x: number, y: number) => void
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -476,28 +476,28 @@ const RelationshipMapper = ({
           if (table) {
             const dx = e.clientX - dragState.startX;
             const dy = e.clientY - dragState.startY;
-            onUpdateTable({
+            onUpdateTables([{
               ...table,
               ui: {
                 ...table.ui!,
                 x: dragState.initialX + dx,
                 y: dragState.initialY + dy
               }
-            });
+            }]);
           }
         } else if (dragState.type === 'resize' && dragState.tableId) {
            const table = tables.find(t => t.id === dragState.tableId);
            if (table) {
              const dx = e.clientX - dragState.startX;
              const dy = e.clientY - dragState.startY;
-             onUpdateTable({
+             onUpdateTables([{
                ...table,
                ui: {
                  ...table.ui!,
                  width: Math.max(200, (dragState.initialW || 300) + dx),
                  height: Math.max(200, (dragState.initialH || 300) + dy)
                }
-             });
+             }]);
            }
         }
       }
@@ -542,51 +542,117 @@ const RelationshipMapper = ({
     tableScrollTimeouts.current[tableId] = setTimeout(() => {
        const table = tables.find(t => t.id === tableId);
        if (table && table.ui) {
-         onUpdateTable({
+         onUpdateTables([{
             ...table,
             ui: { ...table.ui, scrollPos: scrollTop }
-         });
+         }]);
        }
     }, 500);
   };
 
   // --- Toolbox Handlers ---
 
-  const handleToolboxClick = (e: React.MouseEvent, id: string, hiddenTablesIds: string[]) => {
+  const handleToolboxClick = (e: React.MouseEvent, id: string, allIds: string[]) => {
     e.stopPropagation();
-    // Simplified for now based on "just making tree structure first"
+    
+    const newSelected = new Set(selectedToolboxIds);
+
+    if (e.shiftKey && lastSelectedIdRef.current) {
+        // Range selection
+        const start = allIds.indexOf(lastSelectedIdRef.current);
+        const end = allIds.indexOf(id);
+        
+        if (start !== -1 && end !== -1) {
+            const low = Math.min(start, end);
+            const high = Math.max(start, end);
+            const range = allIds.slice(low, high + 1);
+            
+            // If not holding Ctrl, clear previous selection first
+            if (!e.ctrlKey && !e.metaKey) {
+                newSelected.clear();
+            }
+            range.forEach(rid => newSelected.add(rid));
+        }
+    } else if (e.ctrlKey || e.metaKey) {
+        // Toggle selection
+        if (newSelected.has(id)) {
+            newSelected.delete(id);
+        } else {
+            newSelected.add(id);
+            lastSelectedIdRef.current = id;
+        }
+    } else {
+        // Single selection
+        newSelected.clear();
+        newSelected.add(id);
+        lastSelectedIdRef.current = id;
+    }
+
+    setSelectedToolboxIds(newSelected);
   };
 
   const handleToolboxDragStart = (e: React.DragEvent, id: string) => {
-    // Single select drag for now
-    e.dataTransfer.setData('tableId', id);
+    let idsToDrag = Array.from(selectedToolboxIds);
+
+    // If dragging an item NOT in the current selection, select it exclusively (standard OS behavior)
+    if (!selectedToolboxIds.has(id)) {
+        idsToDrag = [id];
+        setSelectedToolboxIds(new Set([id]));
+        lastSelectedIdRef.current = id;
+    }
+
+    // Pass IDs as JSON
+    e.dataTransfer.setData('tableIds', JSON.stringify(idsToDrag));
   };
 
   // Canvas Drop Handler (Adding table from Sidebar)
   const handleCanvasDrop = (e: React.DragEvent) => {
     e.preventDefault();
-    const tableId = e.dataTransfer.getData('tableId');
-    if (!tableId || !containerRef.current) return;
+    if (!containerRef.current) return;
 
-    const table = tables.find(t => t.id === tableId);
-    if (table) {
-        const containerRect = containerRef.current.getBoundingClientRect();
-        const scrollTop = containerRef.current.scrollTop;
-        const scrollLeft = containerRef.current.scrollLeft;
-        
-        // Base drop position
-        const dropX = e.clientX - containerRect.left + scrollLeft;
-        const dropY = e.clientY - containerRect.top + scrollTop;
+    // Retrieve IDs (Handle Multi and fallback for Single)
+    const tableIdsJson = e.dataTransfer.getData('tableIds');
+    let ids: string[] = [];
+    try {
+        ids = JSON.parse(tableIdsJson);
+    } catch(e) {
+        const single = e.dataTransfer.getData('tableId');
+        if (single) ids = [single];
+    }
+    
+    if (ids.length === 0) return;
 
-        onUpdateTable({
-            ...table,
-            ui: {
-                ...table.ui!,
-                x: Math.max(0, dropX - (table.ui?.width || 300) / 2),
-                y: Math.max(0, dropY - 20),
-                isVisible: true
-            }
-        });
+    // Calculate drop position
+    const containerRect = containerRef.current.getBoundingClientRect();
+    const scrollTop = containerRef.current.scrollTop;
+    const scrollLeft = containerRef.current.scrollLeft;
+    
+    const dropX = e.clientX - containerRect.left + scrollLeft;
+    const dropY = e.clientY - containerRect.top + scrollTop;
+
+    // Collect updates
+    const updates: Table[] = [];
+    ids.forEach((tid, index) => {
+        const table = tables.find(t => t.id === tid);
+        if (table) {
+            // Stagger position for multiple items so they don't overlap perfectly
+            const offsetX = index * 20;
+            const offsetY = index * 20;
+
+            updates.push({
+                ...table,
+                ui: {
+                    ...table.ui!,
+                    x: Math.max(0, dropX - (table.ui?.width || 300) / 2 + offsetX),
+                    y: Math.max(0, dropY - 20 + offsetY),
+                    isVisible: true
+                }
+            });
+        }
+    });
+
+    if (updates.length > 0) {
+        onUpdateTables(updates);
     }
   };
 
@@ -673,6 +739,9 @@ const RelationshipMapper = ({
   const handleContextAction = (action: string) => {
     if (!contextMenu) return;
     const rel = relationships.find(r => r.id === contextMenu.relId);
+    
+    setContextMenu(null); // Close menu on selection
+
     if (!rel) return;
 
     if (action === 'delete') {
@@ -715,16 +784,20 @@ const RelationshipMapper = ({
                      <p className="text-[10px] text-slate-400 py-1 pl-2 italic">All tables on canvas</p>
                    ) : (
                      hiddenTables.map(t => {
+                       const isSelected = selectedToolboxIds.has(t.id);
                        return (
                          <div 
                            key={t.id}
                            draggable
                            onDragStart={(e) => handleToolboxDragStart(e, t.id)}
-                           className={`flex items-center gap-2 px-2 py-1 rounded cursor-pointer select-none text-xs transition-colors hover:bg-slate-50 text-slate-600 group`}
+                           onClick={(e) => handleToolboxClick(e, t.id, hiddenTables.map(ht => ht.id))}
+                           className={`flex items-center gap-2 px-2 py-1 rounded cursor-pointer select-none text-xs transition-colors group ${
+                             isSelected ? 'bg-blue-100 text-blue-700 font-medium' : 'hover:bg-slate-50 text-slate-600'
+                           }`}
                          >
-                           <TableIcon size={12} className="text-slate-400 group-hover:text-slate-600"/>
+                           <TableIcon size={12} className={`${isSelected ? 'text-blue-500' : 'text-slate-400 group-hover:text-slate-600'}`}/>
                            <span className="truncate flex-1">{t.name}</span>
-                           <span className="text-[9px] text-slate-400 bg-slate-100 px-1 rounded group-hover:bg-white">{t.columns.length}</span>
+                           <span className={`text-[9px] px-1 rounded ${isSelected ? 'bg-blue-200 text-blue-800' : 'bg-slate-100 text-slate-400 group-hover:bg-white'}`}>{t.columns.length}</span>
                          </div>
                        );
                      })
@@ -762,7 +835,7 @@ const RelationshipMapper = ({
           ref={canvasRef}
           className="w-[3000px] h-[3000px] relative"
         > 
-          <svg className="absolute inset-0 w-full h-full pointer-events-none z-10 overflow-visible">
+          <svg className="absolute inset-0 w-full h-full pointer-events-none z-30 overflow-visible">
             {relationships.map(rel => {
               const srcTable = tables.find(t => t.id === rel.sourceTableId);
               const tgtTable = tables.find(t => t.id === rel.targetTableId);
@@ -877,7 +950,7 @@ const RelationshipMapper = ({
                        title="Hide Table"
                        onMouseDown={(e) => {
                           e.stopPropagation();
-                          onUpdateTable({ ...table, ui: { ...table.ui!, isVisible: false }});
+                          onUpdateTables([{ ...table, ui: { ...table.ui!, isVisible: false }}]);
                        }}
                      >
                        <EyeOff size={14} />
@@ -930,7 +1003,7 @@ const RelationshipMapper = ({
                         
                         {dragState?.type === 'connect' && dragState.tableId !== table.id && (
                           <div 
-                             className="absolute inset-0 bg-blue-500/10 border border-blue-500 rounded cursor-pointer z-50"
+                             className="absolute inset-0 z-50 rounded border border-transparent hover:border-blue-500 hover:bg-blue-500/10 cursor-pointer"
                              onMouseUp={(e) => {
                                e.stopPropagation();
                                if (dragState.colId) {
@@ -999,7 +1072,7 @@ const RelationshipMapper = ({
           </div>
         )}
 
-        <div className="absolute top-4 right-4 w-64 bg-white/90 backdrop-blur-sm rounded-lg shadow-lg border border-slate-200 p-3 z-30 max-h-64 overflow-y-auto">
+        <div className="absolute top-4 right-4 w-64 bg-white/90 backdrop-blur-sm rounded-lg shadow-lg border border-slate-200 p-3 z-40 max-h-64 overflow-y-auto">
           <h4 className="font-semibold text-slate-800 mb-2 text-xs uppercase tracking-wide">Connections</h4>
           {relationships.length === 0 && <p className="text-xs text-slate-400">Drag column handle to connect.</p>}
           <div className="space-y-1">
@@ -1040,7 +1113,7 @@ const RelationshipMapper = ({
 };
 
 // 5. Rules Configuration
-const RulesConfiguration = ({ tables, onUpdateTable }: { tables: Table[], onUpdateTable: (t: Table) => void }) => {
+const RulesConfiguration = ({ tables, relationships, onUpdateTable }: { tables: Table[], relationships: Relationship[], onUpdateTable: (t: Table) => void }) => {
   const [selectedTableId, setSelectedTableId] = useState<string>(tables[0]?.id);
   const activeTable = tables.find(t => t.id === selectedTableId);
 
@@ -1054,6 +1127,19 @@ const RulesConfiguration = ({ tables, onUpdateTable }: { tables: Table[], onUpda
     if (!activeTable) return;
     onUpdateTable({ ...activeTable, genSettings: settings });
   };
+
+  // Function to filter tables based on relationships
+  const getConnectedTables = (currentTableId: string) => {
+    return tables.filter(t => {
+      if (t.id === currentTableId) return false;
+      return relationships.some(r => 
+        (r.sourceTableId === currentTableId && r.targetTableId === t.id) || 
+        (r.targetTableId === currentTableId && r.sourceTableId === t.id)
+      );
+    });
+  };
+
+  const connectedTables = activeTable ? getConnectedTables(activeTable.id) : [];
 
   return (
     <div className="flex-1 flex overflow-hidden">
@@ -1111,7 +1197,7 @@ const RulesConfiguration = ({ tables, onUpdateTable }: { tables: Table[], onUpda
                             className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
                           >
                              <option value="">Select Parent Table...</option>
-                             {tables.filter(t => t.id !== activeTable.id).map(t => (
+                             {connectedTables.map(t => (
                                <option key={t.id} value={t.id}>{t.name}</option>
                              ))}
                           </select>
@@ -1146,7 +1232,8 @@ const RulesConfiguration = ({ tables, onUpdateTable }: { tables: Table[], onUpda
                   <h3 className="text-lg font-semibold text-slate-800">Column Rules</h3>
                </div>
                <div className="divide-y divide-slate-100">
-                 {activeTable.columns.map(col => (
+                 {activeTable.columns.map(col => {
+                    return (
                    <div key={col.id} className="p-6 hover:bg-slate-50 transition-colors">
                       <div className="flex items-start gap-4 mb-4">
                          <div className="mt-1 p-2 bg-blue-50 text-blue-600 rounded-lg"><Hash size={16} /></div>
@@ -1208,10 +1295,62 @@ const RulesConfiguration = ({ tables, onUpdateTable }: { tables: Table[], onUpda
                                   />
                                </div>
                             )}
+                            {col.rule.type === GenerationStrategyType.LINKED && (
+                               <div className="space-y-2">
+                                  <div>
+                                    <label className="block text-xs font-semibold text-slate-500 uppercase mb-1 flex justify-between">
+                                       Source Table
+                                       {connectedTables.length === 0 && <span className="text-red-500 text-[10px] italic normal-case">No connections found</span>}
+                                    </label>
+                                    <select 
+                                      value={col.rule.config?.linkedTableId || activeTable.genSettings?.drivingParentTableId || ''}
+                                      onChange={(e) => handleRuleChange(col.id, { 
+                                        ...col.rule, 
+                                        config: { ...col.rule.config, linkedTableId: e.target.value, linkedColumnId: '' } 
+                                      })}
+                                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none"
+                                    >
+                                      <option value="">Select Table...</option>
+                                      {connectedTables.map(t => (
+                                        <option key={t.id} value={t.id}>
+                                            {t.name} {t.id === activeTable.genSettings?.drivingParentTableId ? '(Driving Parent)' : ''}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                  
+                                  <div>
+                                    <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Source Column</label>
+                                    <select 
+                                      value={col.rule.config?.linkedColumnId || ''}
+                                      onChange={(e) => handleRuleChange(col.id, { 
+                                        ...col.rule, 
+                                        config: { ...col.rule.config, linkedColumnId: e.target.value } 
+                                      })}
+                                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none"
+                                      disabled={!col.rule.config?.linkedTableId && !activeTable.genSettings?.drivingParentTableId}
+                                    >
+                                      <option value="">Select Column...</option>
+                                      {(() => {
+                                         const targetTableId = col.rule.config?.linkedTableId || activeTable.genSettings?.drivingParentTableId;
+                                         const targetTable = tables.find(t => t.id === targetTableId);
+                                         return targetTable?.columns.map(pc => (
+                                           <option key={pc.id} value={pc.id}>{pc.name}</option>
+                                         ));
+                                      })()}
+                                    </select>
+                                  </div>
+                                  <div className="text-xs text-slate-400 italic">
+                                    {col.rule.config?.linkedTableId && col.rule.config.linkedTableId !== activeTable.genSettings?.drivingParentTableId 
+                                      ? "Randomly selects value from source table."
+                                      : "Links to loop iteration value."}
+                                  </div>
+                               </div>
+                            )}
                          </div>
                       </div>
                    </div>
-                 ))}
+                 )})}
                </div>
             </div>
           </div>
@@ -1300,6 +1439,13 @@ const Editor = ({ project, onSave, onBack }: { project: Project, onSave: (p: Pro
      const newTables = localProject.state.tables.map(t => t.id === updatedTable.id ? updatedTable : t);
      handleUpdate({ state: { ...localProject.state, tables: newTables } });
   };
+  
+  // New Plural Update Handler
+  const handleUpdateTables = (updatedTables: Table[]) => {
+     const updatesMap = new Map(updatedTables.map(t => [t.id, t]));
+     const newTables = localProject.state.tables.map(t => updatesMap.get(t.id) || t);
+     handleUpdate({ state: { ...localProject.state, tables: newTables } });
+  };
 
   const handleCanvasScroll = (x: number, y: number) => {
      handleUpdate({ state: { ...localProject.state, canvasScroll: { x, y } } });
@@ -1332,11 +1478,11 @@ const Editor = ({ project, onSave, onBack }: { project: Project, onSave: (p: Pro
                   onAddRelationship={handleAddRelationship}
                   onRemoveRelationship={handleRemoveRelationship}
                   onUpdateRelationship={handleUpdateRelationship}
-                  onUpdateTable={handleUpdateTable}
+                  onUpdateTables={handleUpdateTables} // Pass plural handler
                   onUpdateCanvasScroll={handleCanvasScroll}
                />;
       case 4:
-        return <RulesConfiguration tables={localProject.state.tables} onUpdateTable={handleUpdateTable} />;
+        return <RulesConfiguration tables={localProject.state.tables} relationships={localProject.state.relationships} onUpdateTable={handleUpdateTable} />;
       case 5:
         return <ExportPanel tables={localProject.state.tables} relationships={localProject.state.relationships} />;
       default:

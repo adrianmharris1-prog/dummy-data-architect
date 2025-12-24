@@ -739,6 +739,9 @@ const RelationshipMapper = ({
   const handleContextAction = (action: string) => {
     if (!contextMenu) return;
     const rel = relationships.find(r => r.id === contextMenu.relId);
+    
+    setContextMenu(null); // Close menu on selection
+
     if (!rel) return;
 
     if (action === 'delete') {
@@ -832,7 +835,7 @@ const RelationshipMapper = ({
           ref={canvasRef}
           className="w-[3000px] h-[3000px] relative"
         > 
-          <svg className="absolute inset-0 w-full h-full pointer-events-none z-10 overflow-visible">
+          <svg className="absolute inset-0 w-full h-full pointer-events-none z-30 overflow-visible">
             {relationships.map(rel => {
               const srcTable = tables.find(t => t.id === rel.sourceTableId);
               const tgtTable = tables.find(t => t.id === rel.targetTableId);
@@ -1000,7 +1003,7 @@ const RelationshipMapper = ({
                         
                         {dragState?.type === 'connect' && dragState.tableId !== table.id && (
                           <div 
-                             className="absolute inset-0 bg-blue-500/10 border border-blue-500 rounded cursor-pointer z-50"
+                             className="absolute inset-0 z-50 rounded border border-transparent hover:border-blue-500 hover:bg-blue-500/10 cursor-pointer"
                              onMouseUp={(e) => {
                                e.stopPropagation();
                                if (dragState.colId) {
@@ -1069,7 +1072,7 @@ const RelationshipMapper = ({
           </div>
         )}
 
-        <div className="absolute top-4 right-4 w-64 bg-white/90 backdrop-blur-sm rounded-lg shadow-lg border border-slate-200 p-3 z-30 max-h-64 overflow-y-auto">
+        <div className="absolute top-4 right-4 w-64 bg-white/90 backdrop-blur-sm rounded-lg shadow-lg border border-slate-200 p-3 z-40 max-h-64 overflow-y-auto">
           <h4 className="font-semibold text-slate-800 mb-2 text-xs uppercase tracking-wide">Connections</h4>
           {relationships.length === 0 && <p className="text-xs text-slate-400">Drag column handle to connect.</p>}
           <div className="space-y-1">
@@ -1124,6 +1127,9 @@ const RulesConfiguration = ({ tables, onUpdateTable }: { tables: Table[], onUpda
     if (!activeTable) return;
     onUpdateTable({ ...activeTable, genSettings: settings });
   };
+
+  const isPerParentMode = activeTable?.genSettings?.mode === 'per_parent';
+  const drivingParentTable = isPerParentMode ? tables.find(t => t.id === activeTable?.genSettings?.drivingParentTableId) : null;
 
   return (
     <div className="flex-1 flex overflow-hidden">
@@ -1276,6 +1282,49 @@ const RulesConfiguration = ({ tables, onUpdateTable }: { tables: Table[], onUpda
                                     onChange={(e) => handleRuleChange(col.id, { ...col.rule, config: { ...col.rule.config, aiPrompt: e.target.value } })}
                                     className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm h-[38px] min-h-[38px] resize-y"
                                   />
+                               </div>
+                            )}
+                            {col.rule.type === GenerationStrategyType.LINKED && (
+                               <div className="space-y-2">
+                                  <div>
+                                    <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Source Table</label>
+                                    <select 
+                                      value={col.rule.config?.linkedTableId || activeTable.genSettings?.drivingParentTableId || ''}
+                                      onChange={(e) => handleRuleChange(col.id, { 
+                                        ...col.rule, 
+                                        config: { ...col.rule.config, linkedTableId: e.target.value, linkedColumnId: '' } 
+                                      })}
+                                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none"
+                                    >
+                                      <option value="">Select Table...</option>
+                                      {tables.filter(t => t.id !== activeTable.id).map(t => (
+                                        <option key={t.id} value={t.id}>{t.name}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                  
+                                  <div>
+                                    <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Source Column</label>
+                                    <select 
+                                      value={col.rule.config?.linkedColumnId || ''}
+                                      onChange={(e) => handleRuleChange(col.id, { 
+                                        ...col.rule, 
+                                        config: { ...col.rule.config, linkedColumnId: e.target.value } 
+                                      })}
+                                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none"
+                                      disabled={!col.rule.config?.linkedTableId && !activeTable.genSettings?.drivingParentTableId}
+                                    >
+                                      <option value="">Select Column...</option>
+                                      {tables.find(t => t.id === (col.rule.config?.linkedTableId || activeTable.genSettings?.drivingParentTableId))?.columns.map(pc => (
+                                        <option key={pc.id} value={pc.id}>{pc.name}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                  <div className="text-xs text-slate-400 italic">
+                                    {col.rule.config?.linkedTableId && col.rule.config.linkedTableId !== activeTable.genSettings?.drivingParentTableId 
+                                      ? "Randomly selects value from source table."
+                                      : "Links to loop iteration value."}
+                                  </div>
                                </div>
                             )}
                          </div>

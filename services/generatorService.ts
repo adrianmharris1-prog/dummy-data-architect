@@ -146,9 +146,18 @@ export const generateAndDownload = async (
          drivingParentIds = generatedDataStore[drivingParentId][rel.targetColumnId];
        } else {
          // Fallback if relation not found (shouldn't happen if UI filters correctly) or parent has no data
-         console.warn(`Driving parent data not found for ${table.name}`);
-         settings.mode = 'fixed';
-         settings.fixedCount = 10;
+         // Check if data exists for any column in parent, as fallback
+         const parentTableData = generatedDataStore[drivingParentId];
+         if (parentTableData) {
+            const firstCol = Object.keys(parentTableData)[0];
+            if (firstCol) drivingParentIds = parentTableData[firstCol];
+         }
+         
+         if (drivingParentIds.length === 0) {
+            console.warn(`Driving parent data not found for ${table.name}`);
+            settings.mode = 'fixed';
+            settings.fixedCount = 10;
+         }
        }
     }
 
@@ -164,15 +173,16 @@ export const generateAndDownload = async (
     // If per_parent, we need to construct the loop structure first to know total rows for AI prompt
     interface GenerationJob {
        drivingId?: string; // The ID of the parent if per_parent
+       parentRowIndex?: number; // The index of the parent row in the parent table
        count: number;
     }
     const jobs: GenerationJob[] = [];
 
     if (settings.mode === 'per_parent') {
-       drivingParentIds.forEach(pid => {
+       drivingParentIds.forEach((pid, index) => {
           const count = getRandomInt(settings.minPerParent ?? 1, settings.maxPerParent ?? 5);
           if (count > 0) {
-            jobs.push({ drivingId: pid, count });
+            jobs.push({ drivingId: pid, parentRowIndex: index, count });
             targetRows += count;
           }
        });
@@ -275,6 +285,29 @@ export const generateAndDownload = async (
                 break;
               case GenerationStrategyType.AI:
                 val = aiCache[col.id][globalRowIndex] || "";
+                break;
+              case GenerationStrategyType.LINKED:
+                const targetTableId = col.rule.config?.linkedTableId || settings.drivingParentTableId;
+                const targetColId = col.rule.config?.linkedColumnId;
+                
+                if (targetTableId && targetColId) {
+                    const sourceValues = generatedDataStore[targetTableId]?.[targetColId];
+                    
+                    if (sourceValues && sourceValues.length > 0) {
+                        // Logic: Linked (Strict) or Random?
+                        // If we are in per_parent mode AND the target table IS the driving parent
+                        // Then we use the SPECIFIC row corresponding to the loop.
+                        if (settings.mode === 'per_parent' && targetTableId === settings.drivingParentTableId && job.parentRowIndex !== undefined) {
+                             val = sourceValues[job.parentRowIndex] || "";
+                        } else {
+                             // Otherwise (Fixed mode, or linking to a non-driving table), pick Random.
+                             // This effectively acts as a "Foreign Key" generator.
+                             val = getRandom(sourceValues);
+                        }
+                    } else {
+                        val = ""; 
+                    }
+                }
                 break;
               default:
                 val = "";

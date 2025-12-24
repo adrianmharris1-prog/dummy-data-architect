@@ -11,7 +11,8 @@ export enum GenerationStrategyType {
   PATTERN = 'Pattern (ID)',
   RANDOM = 'Random Selection',
   REFERENCE = 'Reference File',
-  AI = 'AI Creative (Gemini)'
+  AI = 'AI Creative (Gemini)',
+  LINKED = 'Linked (From Parent)'
 }
 
 export interface GenerationRule {
@@ -22,6 +23,8 @@ export interface GenerationRule {
     delimiter?: string; // for Multi-value (e.g. "," or "|")
     aiPrompt?: string; // for Gemini
     referenceFileId?: string; // for Reference
+    linkedTableId?: string; // Explicit table link
+    linkedColumnId?: string; // Explicit column link
   };
 }
 
