@@ -376,7 +376,7 @@ const RelationshipMapper = ({
   onAddRelationship, 
   onRemoveRelationship, 
   onUpdateRelationship,
-  onUpdateTables, // Changed from single table update to plural
+  onUpdateTables,
   onUpdateCanvasScroll
 }: { 
   tables: Table[], 
@@ -386,7 +386,7 @@ const RelationshipMapper = ({
   onAddRelationship: (r: Relationship) => void,
   onRemoveRelationship: (id: string) => void,
   onUpdateRelationship: (r: Relationship) => void,
-  onUpdateTables: (tables: Table[]) => void, // Batch update interface
+  onUpdateTables: (tables: Table[]) => void, 
   onUpdateCanvasScroll: (x: number, y: number) => void
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -395,7 +395,6 @@ const RelationshipMapper = ({
   const tableRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const tableScrollRefs = useRef<Record<string, HTMLDivElement | null>>({});
   
-  // Debounce refs
   const tableScrollTimeouts = useRef<Record<string, any>>({});
   const canvasScrollTimeout = useRef<any>(null);
 
@@ -415,13 +414,11 @@ const RelationshipMapper = ({
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, relId: string } | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   
-  // Toolbox Selection
   const [selectedToolboxIds, setSelectedToolboxIds] = useState<Set<string>>(new Set());
   const lastSelectedIdRef = useRef<string | null>(null);
 
   const [, forceUpdate] = useState(0);
   
-  // 1. Restore Scroll Positions on Mount
   useLayoutEffect(() => {
     if (containerRef.current && canvasScroll) {
        containerRef.current.scrollLeft = canvasScroll.x;
@@ -515,7 +512,6 @@ const RelationshipMapper = ({
     };
   }, [dragState, tables]);
 
-  // Handle Main Canvas Scroll with Debounce Persistence
   const handleMainScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const target = e.target as HTMLElement;
     const x = target.scrollLeft;
@@ -525,15 +521,11 @@ const RelationshipMapper = ({
     
     canvasScrollTimeout.current = setTimeout(() => {
        onUpdateCanvasScroll(x, y);
-    }, 500); // 500ms debounce for persistence
+    }, 500);
   };
 
-  // Handle Table Scroll with Visual Update + Debounce Persistence
   const handleTableScroll = (tableId: string, e: React.UIEvent) => {
-    // 1. Force redraw of lines immediately
     forceUpdate(n => n + 1);
-
-    // 2. Persist scroll position with debounce
     const target = e.target as HTMLElement;
     const scrollTop = target.scrollTop;
 
@@ -550,67 +542,48 @@ const RelationshipMapper = ({
     }, 500);
   };
 
-  // --- Toolbox Handlers ---
-
   const handleToolboxClick = (e: React.MouseEvent, id: string, allIds: string[]) => {
     e.stopPropagation();
-    
     const newSelected = new Set(selectedToolboxIds);
 
     if (e.shiftKey && lastSelectedIdRef.current) {
-        // Range selection
         const start = allIds.indexOf(lastSelectedIdRef.current);
         const end = allIds.indexOf(id);
-        
         if (start !== -1 && end !== -1) {
             const low = Math.min(start, end);
             const high = Math.max(start, end);
             const range = allIds.slice(low, high + 1);
-            
-            // If not holding Ctrl, clear previous selection first
-            if (!e.ctrlKey && !e.metaKey) {
-                newSelected.clear();
-            }
+            if (!e.ctrlKey && !e.metaKey) newSelected.clear();
             range.forEach(rid => newSelected.add(rid));
         }
     } else if (e.ctrlKey || e.metaKey) {
-        // Toggle selection
-        if (newSelected.has(id)) {
-            newSelected.delete(id);
-        } else {
+        if (newSelected.has(id)) newSelected.delete(id);
+        else {
             newSelected.add(id);
             lastSelectedIdRef.current = id;
         }
     } else {
-        // Single selection
         newSelected.clear();
         newSelected.add(id);
         lastSelectedIdRef.current = id;
     }
-
     setSelectedToolboxIds(newSelected);
   };
 
   const handleToolboxDragStart = (e: React.DragEvent, id: string) => {
     let idsToDrag = Array.from(selectedToolboxIds);
-
-    // If dragging an item NOT in the current selection, select it exclusively (standard OS behavior)
     if (!selectedToolboxIds.has(id)) {
         idsToDrag = [id];
         setSelectedToolboxIds(new Set([id]));
         lastSelectedIdRef.current = id;
     }
-
-    // Pass IDs as JSON
     e.dataTransfer.setData('tableIds', JSON.stringify(idsToDrag));
   };
 
-  // Canvas Drop Handler (Adding table from Sidebar)
   const handleCanvasDrop = (e: React.DragEvent) => {
     e.preventDefault();
     if (!containerRef.current) return;
 
-    // Retrieve IDs (Handle Multi and fallback for Single)
     const tableIdsJson = e.dataTransfer.getData('tableIds');
     let ids: string[] = [];
     try {
@@ -622,23 +595,18 @@ const RelationshipMapper = ({
     
     if (ids.length === 0) return;
 
-    // Calculate drop position
     const containerRect = containerRef.current.getBoundingClientRect();
     const scrollTop = containerRef.current.scrollTop;
     const scrollLeft = containerRef.current.scrollLeft;
-    
     const dropX = e.clientX - containerRect.left + scrollLeft;
     const dropY = e.clientY - containerRect.top + scrollTop;
 
-    // Collect updates
     const updates: Table[] = [];
     ids.forEach((tid, index) => {
         const table = tables.find(t => t.id === tid);
         if (table) {
-            // Stagger position for multiple items so they don't overlap perfectly
             const offsetX = index * 20;
             const offsetY = index * 20;
-
             updates.push({
                 ...table,
                 ui: {
@@ -660,95 +628,47 @@ const RelationshipMapper = ({
     e.preventDefault();
   };
 
-  // Clamping connection logic
   const getConnPoint = (tableId: string, colId: string, side: 'left' | 'right') => {
     const table = tables.find(t => t.id === tableId);
-    if (!table || !table.ui) return null;
-
-    // Must be visible to have a connection point
-    if (table.ui.isVisible === false) return null;
-
+    if (!table || !table.ui || table.ui.isVisible === false) return null;
     const colRefKey = `${tableId}::${colId}`;
     const colEl = colRefs.current[colRefKey];
-    
     if (!colEl) return null;
-
     const scrollContainer = colEl.offsetParent as HTMLElement;
     if (!scrollContainer) return null;
-
-    // Dimensions
     const containerTop = scrollContainer.offsetTop;
     const containerLeft = scrollContainer.offsetLeft;
     const containerHeight = scrollContainer.clientHeight;
     const scrollTop = scrollContainer.scrollTop;
-    
     const rowTop = colEl.offsetTop;
     const rowHeight = colEl.offsetHeight;
-
-    // Calculate "Ideal" Center Y relative to the visible scroll view
-    // (rowTop - scrollTop) gives position relative to container top. 
-    // We add rowHeight/2 to center it on the row.
     let relativeY = rowTop - scrollTop + (rowHeight / 2);
-    
-    // Clamp Y values to stay within the scroll container
-    // If < 0 (scrolled up out of view), clamp to top (near header)
-    // If > containerHeight (scrolled down out of view), clamp to bottom
-    const buffer = 8; // Small visual buffer from edge
+    const buffer = 8;
     let isClamped = false;
-
-    if (relativeY < buffer) {
-      relativeY = buffer;
-      isClamped = true;
-    } else if (relativeY > containerHeight - buffer) {
-      relativeY = containerHeight - buffer;
-      isClamped = true;
-    }
-
-    // Final Y relative to the Table (card)
+    if (relativeY < buffer) { relativeY = buffer; isClamped = true; } 
+    else if (relativeY > containerHeight - buffer) { relativeY = containerHeight - buffer; isClamped = true; }
     const localY = containerTop + relativeY;
-
-    // Final X Calculation
     let localX = 0;
-    
-    // If clamped (hidden), snap to the container edge
     if (isClamped) {
-       if (side === 'right') {
-         localX = containerLeft + scrollContainer.clientWidth;
-       } else {
-         localX = containerLeft;
-       }
+       localX = side === 'right' ? containerLeft + scrollContainer.clientWidth : containerLeft;
     } else {
-       // If visible, track the precise handle or row edge
        const handleEl = colEl.querySelector('.conn-handle') as HTMLElement | null;
-       
        if (side === 'right' && handleEl) {
-           const handleCenter = handleEl.offsetLeft + (handleEl.offsetWidth / 2);
-           localX = containerLeft + colEl.offsetLeft + handleCenter;
+           localX = containerLeft + colEl.offsetLeft + handleEl.offsetLeft + (handleEl.offsetWidth / 2);
        } else {
-           // Left side connects to row edge
            localX = containerLeft + colEl.offsetLeft + (side === 'right' ? colEl.offsetWidth : 0);
        }
     }
-    
-    return { 
-      x: table.ui.x + localX, 
-      y: table.ui.y + localY
-    };
+    return { x: table.ui.x + localX, y: table.ui.y + localY };
   };
 
   const handleContextAction = (action: string) => {
     if (!contextMenu) return;
     const rel = relationships.find(r => r.id === contextMenu.relId);
-    
-    setContextMenu(null); // Close menu on selection
-
+    setContextMenu(null);
     if (!rel) return;
-
-    if (action === 'delete') {
-      onRemoveRelationship(rel.id);
-    } else if (action === '1:1' || action === '1:N' || action === 'N:M') {
-      onUpdateRelationship({ ...rel, cardinality: action as Cardinality });
-    }
+    if (action === 'delete') onRemoveRelationship(rel.id);
+    else if (action === '1:1' || action === '1:N' || action === 'N:M') onUpdateRelationship({ ...rel, cardinality: action as Cardinality });
   };
 
   const visibleTables = tables.filter(t => t.ui?.isVisible !== false);
@@ -756,322 +676,98 @@ const RelationshipMapper = ({
 
   return (
     <div className="flex flex-1 overflow-hidden relative">
-      {/* Sidebar - Toolbox */}
-      <div 
-        className={`bg-white border-r border-slate-200 transition-all duration-300 ease-in-out flex flex-col z-40 overflow-hidden ${
-          isSidebarOpen ? 'w-64' : 'w-0 border-none'
-        }`}
-      >
-        {/* Fixed Width Inner Container to prevent Squishing during transition */}
+      <div className={`bg-white border-r border-slate-200 transition-all duration-300 ease-in-out flex flex-col z-40 overflow-hidden ${isSidebarOpen ? 'w-64' : 'w-0 border-none'}`}>
         <div className="w-64 min-w-[16rem] h-full flex flex-col">
           <div className="p-3 border-b border-slate-100 flex items-center justify-end bg-slate-50 h-10">
-             <button onClick={() => setIsSidebarOpen(false)} className="text-slate-400 hover:text-slate-600">
-               <PanelLeftClose size={16} />
-             </button>
+             <button onClick={() => setIsSidebarOpen(false)} className="text-slate-400 hover:text-slate-600"><PanelLeftClose size={16} /></button>
           </div>
-          
           <div className="flex-1 overflow-y-auto p-2">
-             {/* Root Project Node */}
              <div className="mb-2 select-none">
                 <div className="flex items-center gap-2 px-2 py-1.5 rounded text-sm font-bold text-slate-700 mb-1 hover:bg-slate-50">
                     <Database size={14} className="text-blue-600" />
                     <span className="truncate">{projectName}</span>
                 </div>
-                
-                {/* Children (Hidden Tables) */}
                 <div className="pl-3 border-l border-slate-200 ml-3.5 space-y-0.5">
-                   {hiddenTables.length === 0 ? (
-                     <p className="text-[10px] text-slate-400 py-1 pl-2 italic">All tables on canvas</p>
-                   ) : (
-                     hiddenTables.map(t => {
-                       const isSelected = selectedToolboxIds.has(t.id);
-                       return (
-                         <div 
-                           key={t.id}
-                           draggable
-                           onDragStart={(e) => handleToolboxDragStart(e, t.id)}
-                           onClick={(e) => handleToolboxClick(e, t.id, hiddenTables.map(ht => ht.id))}
-                           className={`flex items-center gap-2 px-2 py-1 rounded cursor-pointer select-none text-xs transition-colors group ${
-                             isSelected ? 'bg-blue-100 text-blue-700 font-medium' : 'hover:bg-slate-50 text-slate-600'
-                           }`}
-                         >
-                           <TableIcon size={12} className={`${isSelected ? 'text-blue-500' : 'text-slate-400 group-hover:text-slate-600'}`}/>
-                           <span className="truncate flex-1">{t.name}</span>
-                           <span className={`text-[9px] px-1 rounded ${isSelected ? 'bg-blue-200 text-blue-800' : 'bg-slate-100 text-slate-400 group-hover:bg-white'}`}>{t.columns.length}</span>
-                         </div>
-                       );
-                     })
-                   )}
+                   {hiddenTables.length === 0 ? <p className="text-[10px] text-slate-400 py-1 pl-2 italic">All tables on canvas</p> : hiddenTables.map(t => (
+                     <div key={t.id} draggable onDragStart={(e) => handleToolboxDragStart(e, t.id)} onClick={(e) => handleToolboxClick(e, t.id, hiddenTables.map(ht => ht.id))} className={`flex items-center gap-2 px-2 py-1 rounded cursor-pointer select-none text-xs transition-colors group ${selectedToolboxIds.has(t.id) ? 'bg-blue-100 text-blue-700 font-medium' : 'hover:bg-slate-50 text-slate-600'}`}>
+                       <TableIcon size={12} className={selectedToolboxIds.has(t.id) ? 'text-blue-500' : 'text-slate-400 group-hover:text-slate-600'}/><span className="truncate flex-1">{t.name}</span>
+                       <span className={`text-[9px] px-1 rounded ${selectedToolboxIds.has(t.id) ? 'bg-blue-200 text-blue-800' : 'bg-slate-100 text-slate-400 group-hover:bg-white'}`}>{t.columns.length}</span>
+                     </div>
+                   ))}
                 </div>
              </div>
           </div>
         </div>
       </div>
-
-      {/* Re-open Button (Absolute in Main Canvas to ensure visibility) */}
-      {!isSidebarOpen && (
-        <button 
-          onClick={() => setIsSidebarOpen(true)}
-          className="absolute top-4 left-4 z-50 bg-white p-2 rounded-lg shadow-md border border-slate-200 text-slate-500 hover:text-primary hover:bg-slate-50 transition-colors"
-          title="Open Toolbox"
-        >
-           <PanelLeftOpen size={20} />
-        </button>
-      )}
-
-      {/* Main Canvas Area */}
-      <div 
-        ref={containerRef}
-        className="flex-1 bg-slate-100 relative overflow-auto select-none"
-        onScroll={handleMainScroll}
-        onDrop={handleCanvasDrop}
-        onDragOver={handleDragOver}
-        style={{ 
-          backgroundImage: 'radial-gradient(#cbd5e1 1px, transparent 1px)', 
-          backgroundSize: '20px 20px' 
-        }}
-      >
-        <div 
-          ref={canvasRef}
-          className="w-[3000px] h-[3000px] relative"
-        > 
+      {!isSidebarOpen && <button onClick={() => setIsSidebarOpen(true)} className="absolute top-4 left-4 z-50 bg-white p-2 rounded-lg shadow-md border border-slate-200 text-slate-500 hover:text-primary hover:bg-slate-50 transition-colors"><PanelLeftOpen size={20} /></button>}
+      <div ref={containerRef} className="flex-1 bg-slate-100 relative overflow-auto select-none" onScroll={handleMainScroll} onDrop={handleCanvasDrop} onDragOver={handleDragOver} style={{ backgroundImage: 'radial-gradient(#cbd5e1 1px, transparent 1px)', backgroundSize: '20px 20px' }}>
+        <div ref={canvasRef} className="w-[3000px] h-[3000px] relative"> 
           <svg className="absolute inset-0 w-full h-full pointer-events-none z-30 overflow-visible">
             {relationships.map(rel => {
               const srcTable = tables.find(t => t.id === rel.sourceTableId);
               const tgtTable = tables.find(t => t.id === rel.targetTableId);
-              // Connection lines only visible if BOTH tables are visible
               if (!srcTable?.ui || srcTable.ui.isVisible === false || !tgtTable?.ui || tgtTable.ui.isVisible === false) return null;
-
-              const srcCenter = srcTable.ui.x + srcTable.ui.width / 2;
-              const tgtCenter = tgtTable.ui.x + tgtTable.ui.width / 2;
-              
-              const isSourceLeft = srcCenter < tgtCenter;
+              const isSourceLeft = (srcTable.ui.x + srcTable.ui.width / 2) < (tgtTable.ui.x + tgtTable.ui.width / 2);
               const startSide = isSourceLeft ? 'right' : 'left';
               const endSide = isSourceLeft ? 'left' : 'right';
-
               const start = getConnPoint(rel.sourceTableId, rel.sourceColumnId, startSide);
               const end = getConnPoint(rel.targetTableId, rel.targetColumnId, endSide);
               if (!start || !end) return null;
-
               const controlOffset = 50;
               const c1x = startSide === 'right' ? start.x + controlOffset : start.x - controlOffset;
               const c2x = endSide === 'right' ? end.x + controlOffset : end.x - controlOffset;
-
               const path = `M ${start.x} ${start.y} C ${c1x} ${start.y}, ${c2x} ${end.y}, ${end.x} ${end.y}`;
-              
-              const startLabel = rel.cardinality === 'N:M' ? '∞' : '1';
-              const endLabel = rel.cardinality === '1:1' ? '1' : '∞';
-
               return (
                 <g key={rel.id} className="pointer-events-auto">
-                  <path 
-                    d={path} 
-                    stroke="transparent" 
-                    strokeWidth="20" 
-                    fill="none" 
-                    className="cursor-pointer"
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      setContextMenu({ x: e.clientX, y: e.clientY, relId: rel.id });
-                    }}
-                  />
-                  
-                  <path d={path} stroke="#94a3b8" strokeWidth="4" fill="none" strokeLinecap="round" />
-                  <path d={path} stroke="#2563eb" strokeWidth="2" fill="none" strokeLinecap="round" />
-                  
-                  <circle cx={start.x} cy={start.y} r="3" fill="#2563eb" />
-                  <circle cx={end.x} cy={end.y} r="3" fill="#2563eb" />
-
-                  <text x={startSide === 'right' ? start.x + 10 : start.x - 20} y={start.y - 5} fill="#2563eb" fontSize="12" fontWeight="bold">{startLabel}</text>
-                  <text x={endSide === 'right' ? end.x + 10 : end.x - 20} y={end.y - 5} fill="#2563eb" fontSize="12" fontWeight="bold">{endLabel}</text>
+                  <path d={path} stroke="transparent" strokeWidth="20" fill="none" className="cursor-pointer" onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setContextMenu({ x: e.clientX, y: e.clientY, relId: rel.id }); }}/>
+                  <path d={path} stroke="#94a3b8" strokeWidth="4" fill="none" strokeLinecap="round" /><path d={path} stroke="#2563eb" strokeWidth="2" fill="none" strokeLinecap="round" />
+                  <circle cx={start.x} cy={start.y} r="3" fill="#2563eb" /><circle cx={end.x} cy={end.y} r="3" fill="#2563eb" />
+                  <text x={startSide === 'right' ? start.x + 10 : start.x - 20} y={start.y - 5} fill="#2563eb" fontSize="12" fontWeight="bold">{rel.cardinality === 'N:M' ? '∞' : '1'}</text>
+                  <text x={endSide === 'right' ? end.x + 10 : end.x - 20} y={end.y - 5} fill="#2563eb" fontSize="12" fontWeight="bold">{rel.cardinality === '1:1' ? '1' : '∞'}</text>
                 </g>
               );
             })}
-            
             {dragState?.type === 'connect' && (() => {
               const start = getConnPoint(dragState.tableId!, dragState.colId!, 'right');
               if (!start || !canvasRef.current) return null;
-              
               const canvasRect = canvasRef.current.getBoundingClientRect();
-              const mouseX = mousePos.x - canvasRect.left;
-              const mouseY = mousePos.y - canvasRect.top;
-              
-              return (
-                <line 
-                    x1={start.x} 
-                    y1={start.y} 
-                    x2={mouseX} 
-                    y2={mouseY} 
-                    stroke="#2563eb" 
-                    strokeWidth="2" 
-                    strokeDasharray="5,5" 
-                  />
-              );
+              return <line x1={start.x} y1={start.y} x2={mousePos.x - canvasRect.left} y2={mousePos.y - canvasRect.top} stroke="#2563eb" strokeWidth="2" strokeDasharray="5,5" />;
             })()}
           </svg>
-
           {visibleTables.map((table) => {
              const ui = table.ui || { x: 50, y: 50, width: 300, height: 400 };
-
              return (
-              <div 
-                key={table.id}
-                ref={el => tableRefs.current[table.id] = el}
-                className="absolute bg-white rounded-lg shadow-lg border border-slate-200 flex flex-col z-20 group"
-                style={{
-                  left: ui.x,
-                  top: ui.y,
-                  width: ui.width,
-                  height: ui.height
-                }}
-              >
-                <div 
-                  className="h-10 px-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between cursor-move rounded-t-lg"
-                  onMouseDown={(e) => {
-                     e.stopPropagation();
-                     setDragState({
-                       type: 'move',
-                       tableId: table.id,
-                       startX: e.clientX,
-                       startY: e.clientY,
-                       initialX: ui.x,
-                       initialY: ui.y
-                     });
-                  }}
-                >
-                  <span className="font-semibold text-slate-700 truncate text-sm flex items-center gap-2">
-                     <Database size={14} className="text-slate-400"/> {table.name}
-                  </span>
-                  
-                  <div className="flex items-center gap-1">
-                     <button 
-                       className="p-1 text-slate-400 hover:text-slate-600 rounded"
-                       title="Hide Table"
-                       onMouseDown={(e) => {
-                          e.stopPropagation();
-                          onUpdateTables([{ ...table, ui: { ...table.ui!, isVisible: false }}]);
-                       }}
-                     >
-                       <EyeOff size={14} />
-                     </button>
-                     <Move size={14} className="text-slate-400" />
-                  </div>
+              <div key={table.id} ref={el => tableRefs.current[table.id] = el} className="absolute bg-white rounded-lg shadow-lg border border-slate-200 flex flex-col z-20 group" style={{ left: ui.x, top: ui.y, width: ui.width, height: ui.height }}>
+                <div className="h-10 px-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between cursor-move rounded-t-lg" onMouseDown={(e) => { e.stopPropagation(); setDragState({ type: 'move', tableId: table.id, startX: e.clientX, startY: e.clientY, initialX: ui.x, initialY: ui.y }); }}>
+                  <span className="font-semibold text-slate-700 truncate text-sm flex items-center gap-2"><Database size={14} className="text-slate-400"/> {table.name}</span>
+                  <div className="flex items-center gap-1"><button className="p-1 text-slate-400 hover:text-slate-600 rounded" title="Hide Table" onMouseDown={(e) => { e.stopPropagation(); onUpdateTables([{ ...table, ui: { ...table.ui!, isVisible: false }}]); }}><EyeOff size={14} /></button><Move size={14} className="text-slate-400" /></div>
                 </div>
-
-                {/* IMPORTANT: 'relative' here makes this div the offsetParent for the rows */}
-                <div 
-                  ref={el => tableScrollRefs.current[table.id] = el}
-                  className="flex-1 overflow-y-auto overflow-x-hidden p-2 relative"
-                  onScroll={(e) => handleTableScroll(table.id, e)}
-                >
+                <div ref={el => tableScrollRefs.current[table.id] = el} className="flex-1 overflow-y-auto overflow-x-hidden p-2 relative" onScroll={(e) => handleTableScroll(table.id, e)}>
                   {table.columns.map(col => {
-                    const isSource = relationships.some(r => r.sourceColumnId === col.id);
-                    const isTarget = relationships.some(r => r.targetColumnId === col.id);
-                    const isConnected = isSource || isTarget;
-
+                    const isConnected = relationships.some(r => r.sourceColumnId === col.id || r.targetColumnId === col.id);
                     return (
-                      <div 
-                        key={col.id}
-                        ref={el => {
-                          const refKey = `${table.id}::${col.id}`;
-                          if (el) colRefs.current[refKey] = el;
-                          else delete colRefs.current[refKey];
-                        }}
-                        className={`relative flex items-center justify-between p-2 rounded text-xs mb-1 transition-colors ${isConnected ? 'bg-blue-50/30' : 'hover:bg-slate-50'}`}
-                      >
+                      <div key={col.id} ref={el => { const refKey = `${table.id}::${col.id}`; if (el) colRefs.current[refKey] = el; else delete colRefs.current[refKey]; }} className={`relative flex items-center justify-between p-2 rounded text-xs mb-1 transition-colors ${isConnected ? 'bg-blue-50/30' : 'hover:bg-slate-50'}`}>
                         <span className={`font-medium truncate mr-2 flex-1 ${isConnected ? 'text-blue-700' : 'text-slate-700'}`} title={col.name}>{col.name}</span>
-                        
-                        <div 
-                          className={`conn-handle w-3 h-3 rounded-full border cursor-crosshair transition-all shadow-sm ${
-                            isConnected 
-                              ? 'bg-blue-500 border-blue-600 scale-110' 
-                              : 'bg-slate-100 border-slate-300 hover:bg-blue-400 hover:border-blue-500'
-                          }`}
-                          onMouseDown={(e) => {
-                            e.stopPropagation();
-                            setDragState({
-                              type: 'connect',
-                              tableId: table.id,
-                              colId: col.id,
-                              startX: e.clientX,
-                              startY: e.clientY,
-                              initialX: 0, initialY: 0
-                            });
-                          }}
-                        />
-                        
-                        {dragState?.type === 'connect' && dragState.tableId !== table.id && (
-                          <div 
-                             className="absolute inset-0 z-50 rounded border border-transparent hover:border-blue-500 hover:bg-blue-500/10 cursor-pointer"
-                             onMouseUp={(e) => {
-                               e.stopPropagation();
-                               if (dragState.colId) {
-                                 onAddRelationship({
-                                   id: `rel-${Date.now()}`,
-                                   sourceTableId: dragState.tableId!,
-                                   sourceColumnId: dragState.colId,
-                                   targetTableId: table.id,
-                                   targetColumnId: col.id,
-                                   cardinality: '1:N'
-                                 });
-                               }
-                               setDragState(null);
-                             }}
-                          />
-                        )}
+                        <div className={`conn-handle w-3 h-3 rounded-full border cursor-crosshair transition-all shadow-sm ${isConnected ? 'bg-blue-500 border-blue-600 scale-110' : 'bg-slate-100 border-slate-300 hover:bg-blue-400 hover:border-blue-500'}`} onMouseDown={(e) => { e.stopPropagation(); setDragState({ type: 'connect', tableId: table.id, colId: col.id, startX: e.clientX, startY: e.clientY, initialX: 0, initialY: 0 }); }}/>
+                        {dragState?.type === 'connect' && dragState.tableId !== table.id && <div className="absolute inset-0 z-50 rounded border border-transparent hover:border-blue-500 hover:bg-blue-500/10 cursor-pointer" onMouseUp={(e) => { e.stopPropagation(); if (dragState.colId) onAddRelationship({ id: `rel-${Date.now()}`, sourceTableId: dragState.tableId!, sourceColumnId: dragState.colId, targetTableId: table.id, targetColumnId: col.id, cardinality: '1:N' }); setDragState(null); }}/>}
                       </div>
                     );
                   })}
                 </div>
-
-                <div 
-                  className="absolute bottom-1 right-1 cursor-nwse-resize text-slate-300 hover:text-slate-500 p-1"
-                  onMouseDown={(e) => {
-                    e.stopPropagation();
-                    setDragState({
-                      type: 'resize',
-                      tableId: table.id,
-                      startX: e.clientX,
-                      startY: e.clientY,
-                      initialX: 0, initialY: 0, 
-                      initialW: ui.width,
-                      initialH: ui.height
-                    });
-                  }}
-                >
-                  <Maximize2 size={12} className="rotate-90" />
-                </div>
+                <div className="absolute bottom-1 right-1 cursor-nwse-resize text-slate-300 hover:text-slate-500 p-1" onMouseDown={(e) => { e.stopPropagation(); setDragState({ type: 'resize', tableId: table.id, startX: e.clientX, startY: e.clientY, initialX: 0, initialY: 0, initialW: ui.width, initialH: ui.height }); }}><Maximize2 size={12} className="rotate-90" /></div>
               </div>
              );
           })}
         </div>
-
         {contextMenu && (
-          <div 
-            className="fixed bg-white rounded-lg shadow-xl border border-slate-200 py-1 z-50 w-48 animate-in fade-in zoom-in-95 duration-100"
-            style={{ left: contextMenu.x, top: contextMenu.y }}
-            onClick={(e) => e.stopPropagation()}
-          >
-             <div className="px-3 py-2 text-xs font-semibold text-slate-400 uppercase tracking-wider border-b border-slate-100 mb-1">
-               Relationship
-             </div>
-             <button onClick={() => handleContextAction('1:1')} className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 hover:text-primary flex justify-between">
-               One-to-One <span>1:1</span>
-             </button>
-             <button onClick={() => handleContextAction('1:N')} className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 hover:text-primary flex justify-between">
-               One-to-Many <span>1:∞</span>
-             </button>
-             <button onClick={() => handleContextAction('N:M')} className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 hover:text-primary flex justify-between">
-               Many-to-Many <span>∞:∞</span>
-             </button>
-             <div className="h-px bg-slate-100 my-1" />
-             <button onClick={() => handleContextAction('delete')} className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2">
-               <Trash2 size={14} /> Delete
-             </button>
+          <div className="fixed bg-white rounded-lg shadow-xl border border-slate-200 py-1 z-50 w-48 animate-in fade-in zoom-in-95 duration-100" style={{ left: contextMenu.x, top: contextMenu.y }} onClick={(e) => e.stopPropagation()}>
+             <div className="px-3 py-2 text-xs font-semibold text-slate-400 uppercase tracking-wider border-b border-slate-100 mb-1">Relationship</div>
+             <button onClick={() => handleContextAction('1:1')} className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 hover:text-primary flex justify-between">One-to-One <span>1:1</span></button>
+             <button onClick={() => handleContextAction('1:N')} className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 hover:text-primary flex justify-between">One-to-Many <span>1:∞</span></button>
+             <button onClick={() => handleContextAction('N:M')} className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 hover:text-primary flex justify-between">Many-to-Many <span>∞:∞</span></button>
+             <div className="h-px bg-slate-100 my-1" /><button onClick={() => handleContextAction('delete')} className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"><Trash2 size={14} /> Delete</button>
           </div>
         )}
-
         <div className="absolute top-4 right-4 w-64 bg-white/90 backdrop-blur-sm rounded-lg shadow-lg border border-slate-200 p-3 z-40 max-h-64 overflow-y-auto">
           <h4 className="font-semibold text-slate-800 mb-2 text-xs uppercase tracking-wide">Connections</h4>
           {relationships.length === 0 && <p className="text-xs text-slate-400">Drag column handle to connect.</p>}
@@ -1079,29 +775,14 @@ const RelationshipMapper = ({
             {relationships.map(rel => {
                  const srcT = tables.find(t => t.id === rel.sourceTableId);
                  const tgtT = tables.find(t => t.id === rel.targetTableId);
-                 const srcC = srcT?.columns.find(c => c.id === rel.sourceColumnId);
-                 const tgtC = tgtT?.columns.find(c => c.id === rel.targetColumnId);
-                 
-                 // Show connection in list even if table hidden? Maybe, but let's hide to reduce clutter
                  if (!srcT?.ui || srcT.ui.isVisible === false || !tgtT?.ui || tgtT.ui.isVisible === false) return null;
-
                  return (
                    <div key={rel.id} className="flex items-center justify-between text-xs p-1.5 bg-slate-50 rounded border border-slate-100 group">
                       <div className="flex flex-col overflow-hidden w-full">
-                        <div className="flex items-center gap-1 mb-0.5">
-                          <span className="font-medium text-blue-600 truncate max-w-[80px]">{srcT?.name}</span>
-                          <ArrowRight size={10} className="text-slate-300 flex-shrink-0" />
-                          <span className="font-medium text-blue-600 truncate max-w-[80px]">{tgtT?.name}</span>
-                        </div>
-                        <div className="flex items-center justify-between text-slate-500">
-                          <span className="truncate max-w-[80px]">{srcC?.name}</span>
-                          <span className="text-[10px] bg-slate-200 px-1 rounded">{rel.cardinality || '1:N'}</span>
-                          <span className="truncate max-w-[80px] text-right">{tgtC?.name}</span>
-                        </div>
+                        <div className="flex items-center gap-1 mb-0.5"><span className="font-medium text-blue-600 truncate max-w-[80px]">{srcT?.name}</span><ArrowRight size={10} className="text-slate-300 flex-shrink-0" /><span className="font-medium text-blue-600 truncate max-w-[80px]">{tgtT?.name}</span></div>
+                        <div className="flex items-center justify-between text-slate-500"><span className="truncate max-w-[80px]">{srcT?.columns.find(c => c.id === rel.sourceColumnId)?.name}</span><span className="text-[10px] bg-slate-200 px-1 rounded">{rel.cardinality || '1:N'}</span><span className="truncate max-w-[80px] text-right">{tgtT?.columns.find(c => c.id === rel.targetColumnId)?.name}</span></div>
                       </div>
-                      <button onClick={() => onRemoveRelationship(rel.id)} className="ml-2 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <X size={14} />
-                      </button>
+                      <button onClick={() => onRemoveRelationship(rel.id)} className="ml-2 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"><X size={14} /></button>
                    </div>
                  );
               })}
@@ -1113,7 +794,7 @@ const RelationshipMapper = ({
 };
 
 // 5. Rules Configuration
-const RulesConfiguration = ({ tables, onUpdateTable }: { tables: Table[], onUpdateTable: (t: Table) => void }) => {
+const RulesConfiguration = ({ tables, relationships, onUpdateTable }: { tables: Table[], relationships: Relationship[], onUpdateTable: (t: Table) => void }) => {
   const [selectedTableId, setSelectedTableId] = useState<string>(tables[0]?.id);
   const activeTable = tables.find(t => t.id === selectedTableId);
 
@@ -1128,8 +809,18 @@ const RulesConfiguration = ({ tables, onUpdateTable }: { tables: Table[], onUpda
     onUpdateTable({ ...activeTable, genSettings: settings });
   };
 
-  const isPerParentMode = activeTable?.genSettings?.mode === 'per_parent';
-  const drivingParentTable = isPerParentMode ? tables.find(t => t.id === activeTable?.genSettings?.drivingParentTableId) : null;
+  // Function to filter tables based on relationships defined in Step 3
+  const getConnectedTables = (currentTableId: string) => {
+    return tables.filter(t => {
+      if (t.id === currentTableId) return false;
+      return relationships.some(r => 
+        (r.sourceTableId === currentTableId && r.targetTableId === t.id) || 
+        (r.targetTableId === currentTableId && r.sourceTableId === t.id)
+      );
+    });
+  };
+
+  const connectedTables = activeTable ? getConnectedTables(activeTable.id) : [];
 
   return (
     <div className="flex-1 flex overflow-hidden">
@@ -1184,13 +875,14 @@ const RulesConfiguration = ({ tables, onUpdateTable }: { tables: Table[], onUpda
                           <select
                             value={activeTable.genSettings?.drivingParentTableId || ''}
                             onChange={(e) => handleSettingsChange({ ...activeTable.genSettings!, drivingParentTableId: e.target.value, mode: 'per_parent', fixedCount: 0 })}
-                            className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                            className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none"
                           >
                              <option value="">Select Parent Table...</option>
-                             {tables.filter(t => t.id !== activeTable.id).map(t => (
+                             {connectedTables.map(t => (
                                <option key={t.id} value={t.id}>{t.name}</option>
                              ))}
                           </select>
+                          {connectedTables.length === 0 && <p className="text-[10px] text-red-500 mt-1 italic">No connected tables found. Define relationships in the Relations tab first.</p>}
                        </div>
                        <div className="flex gap-4">
                           <div className="flex-1">
@@ -1218,9 +910,7 @@ const RulesConfiguration = ({ tables, onUpdateTable }: { tables: Table[], onUpda
             </div>
 
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-               <div className="px-6 py-4 border-b border-slate-100">
-                  <h3 className="text-lg font-semibold text-slate-800">Column Rules</h3>
-               </div>
+               <div className="px-6 py-4 border-b border-slate-100"><h3 className="text-lg font-semibold text-slate-800">Column Rules</h3></div>
                <div className="divide-y divide-slate-100">
                  {activeTable.columns.map(col => (
                    <div key={col.id} className="p-6 hover:bg-slate-50 transition-colors">
@@ -1251,37 +941,19 @@ const RulesConfiguration = ({ tables, onUpdateTable }: { tables: Table[], onUpda
                             {col.rule.type === GenerationStrategyType.PATTERN && (
                                <div>
                                   <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Pattern (use # for number)</label>
-                                  <input 
-                                    type="text" 
-                                    value={col.rule.config?.pattern || ''}
-                                    placeholder="e.g. ORD-####"
-                                    onChange={(e) => handleRuleChange(col.id, { ...col.rule, config: { ...col.rule.config, pattern: e.target.value } })}
-                                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
-                                  />
+                                  <input type="text" value={col.rule.config?.pattern || ''} placeholder="e.g. ORD-####" onChange={(e) => handleRuleChange(col.id, { ...col.rule, config: { ...col.rule.config, pattern: e.target.value } })} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
                                </div>
                             )}
                             {col.rule.type === GenerationStrategyType.RANDOM && (
                                <div>
                                   <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Options (comma separated)</label>
-                                  <input 
-                                    type="text" 
-                                    value={col.rule.config?.options?.join(', ') || ''}
-                                    onChange={(e) => handleRuleChange(col.id, { ...col.rule, config: { ...col.rule.config, options: e.target.value.split(',').map(s => s.trim()) } })}
-                                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
-                                  />
+                                  <input type="text" value={col.rule.config?.options?.join(', ') || ''} onChange={(e) => handleRuleChange(col.id, { ...col.rule, config: { ...col.rule.config, options: e.target.value.split(',').map(s => s.trim()) } })} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
                                </div>
                             )}
                             {col.rule.type === GenerationStrategyType.AI && (
                                <div>
-                                  <label className="block text-xs font-semibold text-slate-500 uppercase mb-1 flex items-center gap-1">
-                                    <Sparkles size={12} className="text-purple-500"/> AI Prompt
-                                  </label>
-                                  <textarea 
-                                    value={col.rule.config?.aiPrompt || ''}
-                                    placeholder="Describe what kind of data to generate..."
-                                    onChange={(e) => handleRuleChange(col.id, { ...col.rule, config: { ...col.rule.config, aiPrompt: e.target.value } })}
-                                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm h-[38px] min-h-[38px] resize-y"
-                                  />
+                                  <label className="block text-xs font-semibold text-slate-500 uppercase mb-1 flex items-center gap-1"><Sparkles size={12} className="text-purple-500"/> AI Prompt</label>
+                                  <textarea value={col.rule.config?.aiPrompt || ''} placeholder="Describe what kind of data to generate..." onChange={(e) => handleRuleChange(col.id, { ...col.rule, config: { ...col.rule.config, aiPrompt: e.target.value } })} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm h-[38px] min-h-[38px] resize-y" />
                                </div>
                             )}
                             {col.rule.type === GenerationStrategyType.LINKED && (
@@ -1297,20 +969,18 @@ const RulesConfiguration = ({ tables, onUpdateTable }: { tables: Table[], onUpda
                                       className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none"
                                     >
                                       <option value="">Select Table...</option>
-                                      {tables.filter(t => t.id !== activeTable.id).map(t => (
+                                      {connectedTables.map(t => (
                                         <option key={t.id} value={t.id}>{t.name}</option>
                                       ))}
                                     </select>
+                                    {connectedTables.length === 0 && <p className="text-[10px] text-red-500 mt-1 italic">No connected tables found.</p>}
                                   </div>
                                   
                                   <div>
                                     <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Source Column</label>
                                     <select 
                                       value={col.rule.config?.linkedColumnId || ''}
-                                      onChange={(e) => handleRuleChange(col.id, { 
-                                        ...col.rule, 
-                                        config: { ...col.rule.config, linkedColumnId: e.target.value } 
-                                      })}
+                                      onChange={(e) => handleRuleChange(col.id, { ...col.rule, config: { ...col.rule.config, linkedColumnId: e.target.value } })}
                                       className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none"
                                       disabled={!col.rule.config?.linkedTableId && !activeTable.genSettings?.drivingParentTableId}
                                     >
@@ -1319,11 +989,6 @@ const RulesConfiguration = ({ tables, onUpdateTable }: { tables: Table[], onUpda
                                         <option key={pc.id} value={pc.id}>{pc.name}</option>
                                       ))}
                                     </select>
-                                  </div>
-                                  <div className="text-xs text-slate-400 italic">
-                                    {col.rule.config?.linkedTableId && col.rule.config.linkedTableId !== activeTable.genSettings?.drivingParentTableId 
-                                      ? "Randomly selects value from source table."
-                                      : "Links to loop iteration value."}
                                   </div>
                                </div>
                             )}
@@ -1344,50 +1009,19 @@ const RulesConfiguration = ({ tables, onUpdateTable }: { tables: Table[], onUpda
 const ExportPanel = ({ tables, relationships }: { tables: Table[], relationships: Relationship[] }) => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [progress, setProgress] = useState("");
-
   const handleGenerate = async () => {
-    setIsGenerating(true);
-    setProgress("Starting...");
-    try {
-      await generateAndDownload(tables, relationships, 0, setProgress);
-    } catch (e) {
-      console.error(e);
-      setProgress("Error occurred.");
-    } finally {
-      setTimeout(() => {
-         setIsGenerating(false);
-         setProgress("");
-      }, 2000);
-    }
+    setIsGenerating(true); setProgress("Starting...");
+    try { await generateAndDownload(tables, relationships, 0, setProgress); } 
+    catch (e) { console.error(e); setProgress("Error occurred."); } 
+    finally { setTimeout(() => { setIsGenerating(false); setProgress(""); }, 2000); }
   };
-
   return (
     <div className="flex-1 flex flex-col items-center justify-center bg-slate-50 p-12">
       <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-8 max-w-md w-full text-center">
-         <div className="w-20 h-20 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-6">
-            <Download size={40} />
-         </div>
+         <div className="w-20 h-20 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-6"><Download size={40} /></div>
          <h2 className="text-2xl font-bold text-slate-800 mb-2">Ready to Generate</h2>
-         <p className="text-slate-500 mb-8">
-           We have {tables.length} tables and {relationships.length} relationships configured.
-           Click below to generate your synthetic dataset.
-         </p>
-         
-         {isGenerating ? (
-            <div className="space-y-4">
-              <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
-                <div className="h-full bg-primary animate-progress origin-left w-full"></div>
-              </div>
-              <p className="text-sm font-medium text-slate-600 animate-pulse">{progress}</p>
-            </div>
-         ) : (
-            <button 
-              onClick={handleGenerate}
-              className="w-full py-4 bg-primary hover:bg-blue-700 text-white rounded-xl font-bold text-lg shadow-lg shadow-blue-500/30 transition-all transform hover:-translate-y-1"
-            >
-              Generate & Download ZIP
-            </button>
-         )}
+         <p className="text-slate-500 mb-8">We have {tables.length} tables and {relationships.length} relationships configured. Click below to generate your synthetic dataset.</p>
+         {isGenerating ? <div className="space-y-4"><div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden"><div className="h-full bg-primary animate-progress origin-left w-full"></div></div><p className="text-sm font-medium text-slate-600 animate-pulse">{progress}</p></div> : <button onClick={handleGenerate} className="w-full py-4 bg-primary hover:bg-blue-700 text-white rounded-xl font-bold text-lg shadow-lg shadow-blue-500/30 transition-all transform hover:-translate-y-1">Generate & Download ZIP</button>}
       </div>
     </div>
   );
@@ -1396,90 +1030,30 @@ const ExportPanel = ({ tables, relationships }: { tables: Table[], relationships
 // Main Editor Component
 const Editor = ({ project, onSave, onBack }: { project: Project, onSave: (p: Project) => void, onBack: () => void }) => {
   const [localProject, setLocalProject] = useState<Project>(project);
-  
-  useEffect(() => {
-     setLocalProject(project);
-  }, [project.id]);
-
-  const handleUpdate = (updates: Partial<Project>) => {
-     const updated = { ...localProject, ...updates };
-     setLocalProject(updated);
-     onSave(updated); // Auto-save
-  };
-
-  const handleFilesUploaded = (newTables: Table[]) => {
-     const mergedTables = [...localProject.state.tables, ...newTables];
-     handleUpdate({ 
-       state: { ...localProject.state, tables: mergedTables },
-       currentStep: 2
-     });
-  };
-
-  const handleUpdateTable = (updatedTable: Table) => {
-     const newTables = localProject.state.tables.map(t => t.id === updatedTable.id ? updatedTable : t);
-     handleUpdate({ state: { ...localProject.state, tables: newTables } });
-  };
-  
-  // New Plural Update Handler
-  const handleUpdateTables = (updatedTables: Table[]) => {
-     const updatesMap = new Map(updatedTables.map(t => [t.id, t]));
-     const newTables = localProject.state.tables.map(t => updatesMap.get(t.id) || t);
-     handleUpdate({ state: { ...localProject.state, tables: newTables } });
-  };
-
-  const handleCanvasScroll = (x: number, y: number) => {
-     handleUpdate({ state: { ...localProject.state, canvasScroll: { x, y } } });
-  }
-
-  const handleAddRelationship = (rel: Relationship) => {
-    handleUpdate({ state: { ...localProject.state, relationships: [...localProject.state.relationships, rel] } });
-  };
-
-  const handleRemoveRelationship = (id: string) => {
-    handleUpdate({ state: { ...localProject.state, relationships: localProject.state.relationships.filter(r => r.id !== id) } });
-  };
-
-  const handleUpdateRelationship = (rel: Relationship) => {
-    handleUpdate({ state: { ...localProject.state, relationships: localProject.state.relationships.map(r => r.id === rel.id ? rel : r) } });
-  };
+  useEffect(() => { setLocalProject(project); }, [project.id]);
+  const handleUpdate = (updates: Partial<Project>) => { const updated = { ...localProject, ...updates }; setLocalProject(updated); onSave(updated); };
+  const handleFilesUploaded = (newTables: Table[]) => { const mergedTables = [...localProject.state.tables, ...newTables]; handleUpdate({ state: { ...localProject.state, tables: mergedTables }, currentStep: 2 }); };
+  const handleUpdateTable = (updatedTable: Table) => { const newTables = localProject.state.tables.map(t => t.id === updatedTable.id ? updatedTable : t); handleUpdate({ state: { ...localProject.state, tables: newTables } }); };
+  const handleUpdateTables = (updatedTables: Table[]) => { const updatesMap = new Map(updatedTables.map(t => [t.id, t])); const newTables = localProject.state.tables.map(t => updatesMap.get(t.id) || t); handleUpdate({ state: { ...localProject.state, tables: newTables } }); };
+  const handleCanvasScroll = (x: number, y: number) => { handleUpdate({ state: { ...localProject.state, canvasScroll: { x, y } } }); }
+  const handleAddRelationship = (rel: Relationship) => { handleUpdate({ state: { ...localProject.state, relationships: [...localProject.state.relationships, rel] } }); };
+  const handleRemoveRelationship = (id: string) => { handleUpdate({ state: { ...localProject.state, relationships: localProject.state.relationships.filter(r => r.id !== id) } }); };
+  const handleUpdateRelationship = (rel: Relationship) => { handleUpdate({ state: { ...localProject.state, relationships: localProject.state.relationships.map(r => r.id === rel.id ? rel : r) } }); };
 
   const renderStep = () => {
     switch (localProject.currentStep) {
-      case 1: 
-        return <FileUploadStep onFilesUploaded={handleFilesUploaded} />;
-      case 2:
-        return <SchemaStep tables={localProject.state.tables} onUpdateTable={handleUpdateTable} />;
-      case 3:
-        return <RelationshipMapper 
-                  tables={localProject.state.tables} 
-                  relationships={localProject.state.relationships}
-                  canvasScroll={localProject.state.canvasScroll}
-                  projectName={localProject.name}
-                  onAddRelationship={handleAddRelationship}
-                  onRemoveRelationship={handleRemoveRelationship}
-                  onUpdateRelationship={handleUpdateRelationship}
-                  onUpdateTables={handleUpdateTables} // Pass plural handler
-                  onUpdateCanvasScroll={handleCanvasScroll}
-               />;
-      case 4:
-        return <RulesConfiguration tables={localProject.state.tables} onUpdateTable={handleUpdateTable} />;
-      case 5:
-        return <ExportPanel tables={localProject.state.tables} relationships={localProject.state.relationships} />;
-      default:
-        return <div>Unknown Step</div>;
+      case 1: return <FileUploadStep onFilesUploaded={handleFilesUploaded} />;
+      case 2: return <SchemaStep tables={localProject.state.tables} onUpdateTable={handleUpdateTable} />;
+      case 3: return <RelationshipMapper tables={localProject.state.tables} relationships={localProject.state.relationships} canvasScroll={localProject.state.canvasScroll} projectName={localProject.name} onAddRelationship={handleAddRelationship} onRemoveRelationship={handleRemoveRelationship} onUpdateRelationship={handleUpdateRelationship} onUpdateTables={handleUpdateTables} onUpdateCanvasScroll={handleCanvasScroll} />;
+      case 4: return <RulesConfiguration tables={localProject.state.tables} relationships={localProject.state.relationships} onUpdateTable={handleUpdateTable} />;
+      case 5: return <ExportPanel tables={localProject.state.tables} relationships={localProject.state.relationships} />;
+      default: return <div>Unknown Step</div>;
     }
   };
 
   return (
     <div className="flex flex-col h-screen bg-white">
-      <Navbar 
-        step={localProject.currentStep} 
-        projectName={localProject.name}
-        onBack={onBack}
-        onSave={() => onSave(localProject)}
-        onStepChange={(step) => handleUpdate({ currentStep: step })}
-        canNavigate={localProject.state.tables.length > 0}
-      />
+      <Navbar step={localProject.currentStep} projectName={localProject.name} onBack={onBack} onSave={() => onSave(localProject)} onStepChange={(step) => handleUpdate({ currentStep: step })} canNavigate={localProject.state.tables.length > 0} />
       {renderStep()}
     </div>
   );
