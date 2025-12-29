@@ -1,9 +1,11 @@
+
 export enum DataType {
   STRING = 'String',
   NUMBER = 'Number',
   DATE = 'Date',
   BOOLEAN = 'Boolean',
-  DROPDOWN = 'Dropdown'
+  DROPDOWN = 'Dropdown',
+  REVISION = 'Revision'
 }
 
 export enum GenerationStrategyType {
@@ -15,6 +17,12 @@ export enum GenerationStrategyType {
   LINKED = 'Linked (From Parent)'
 }
 
+export interface ReferenceFile {
+  id: string;
+  name: string;
+  values: string[];
+}
+
 export interface GenerationRule {
   type: GenerationStrategyType;
   config?: {
@@ -22,7 +30,8 @@ export interface GenerationRule {
     options?: string[]; // for Dropdown/Random
     delimiter?: string; // for Multi-value (e.g. "," or "|")
     aiPrompt?: string; // for Gemini
-    referenceFileId?: string; // for Reference
+    dependentColumnId?: string; // Column to use as context for AI
+    referenceFileId?: string; // NEW: The ID of the uploaded reference file to use
     linkedTableId?: string; // Explicit table link
     linkedColumnId?: string; // Explicit column link
   };
@@ -43,6 +52,7 @@ export interface Column {
   isMultiValue: boolean;
   sampleValues: string[]; // First few rows from upload
   rule: GenerationRule;
+  revisionSchema?: string; // NEW: Sequence of revision labels like "0, 1, 2" or "-, A, B"
 }
 
 export interface Table {
@@ -75,6 +85,7 @@ export interface Relationship {
 export interface ProjectState {
   tables: Table[];
   relationships: Relationship[];
+  referenceFiles: ReferenceFile[]; // NEW: Storage for reference datasets
   canvasScroll?: { x: number; y: number }; // Added for main canvas scroll persistence
 }
 

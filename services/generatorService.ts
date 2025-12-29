@@ -1,6 +1,7 @@
+
 import JSZip from 'jszip';
 import * as FileSaver from 'file-saver';
-import { Table, Relationship, GenerationStrategyType, DataType, Column } from '../types';
+import { Table, Relationship, GenerationStrategyType, DataType, Column, ReferenceFile } from '../types';
 import { generateSyntheticDataBatch } from './geminiService';
 
 // --- Helper Functions ---
@@ -23,12 +24,9 @@ const generateId = (pattern: string, index: number): string => {
     return generateRandomHex(len || 32);
   }
 
-  // Replace # with index (padded)
   const hashCount = (pattern.match(/#/g) || []).length;
   if (hashCount === 0) return `${pattern}${index}`;
   
-  const paddedIndex = index.toString().padStart(hashCount, '0');
-  // This is a simplistic replacement
   return pattern.replace(/#+/g, (match) => {
      return index.toString().padStart(match.length, '0');
   });
@@ -47,14 +45,12 @@ const generateDate = (type: 'random' | 'future', referenceDateStr?: string) => {
    if (type === 'future' && referenceDateStr) {
       const start = new Date(referenceDateStr).getTime();
       const end = now.getTime();
-      // Ensure start is valid and before end, else fallback to random recent
       if (isNaN(start) || start >= end) return now.toISOString();
       return new Date(start + Math.random() * (end - start)).toISOString();
    }
    return now.toISOString();
 };
 
-// Topological Sort to respect FK dependencies
 const getGenerationOrder = (tables: Table[], relationships: Relationship[]): Table[] => {
   const adj = new Map<string, string[]>();
   const inDegree = new Map<string, number>();
@@ -65,12 +61,8 @@ const getGenerationOrder = (tables: Table[], relationships: Relationship[]): Tab
   });
 
   relationships.forEach(rel => {
-    // If Table B has a FK to Table A, Table A must be generated first.
-    // So A -> B
     const parent = rel.targetTableId; 
     const child = rel.sourceTableId;
-    
-    // Avoid self-references causing cycles
     if (parent !== child) {
         adj.get(parent)?.push(child);
         inDegree.set(child, (inDegree.get(child) || 0) + 1);
@@ -92,7 +84,6 @@ const getGenerationOrder = (tables: Table[], relationships: Relationship[]): Tab
     });
   }
 
-  // If cycle detected, just add remaining
   if (order.length !== tables.length) {
       const remaining = tables.filter(t => !order.includes(t.id)).map(t => t.id);
       order.push(...remaining);
@@ -104,13 +95,12 @@ const getGenerationOrder = (tables: Table[], relationships: Relationship[]): Tab
 export const generateAndDownload = async (
   tables: Table[],
   relationships: Relationship[],
-  globalRowCount: number, // Ignored now, using table settings
+  referenceFiles: ReferenceFile[],
   onProgress: (msg: string) => void
 ) => {
   const zip = new JSZip();
-  const generatedDataStore: Record<string, Record<string, string[]>> = {}; // TableID -> ColID -> Array of values
+  const generatedDataStore: Record<string, Record<string, string[]>> = {}; 
   
-  // 1. Determine Table Order
   const orderedTables = getGenerationOrder(tables, relationships);
   
   onProgress("Planning generation strategy...");
@@ -119,61 +109,36 @@ export const generateAndDownload = async (
     onProgress(`Processing table: ${table.name}...`);
     const tableData: Record<string, string[]> = {};
     
-    // Initialize columns
     for (const col of table.columns) {
       tableData[col.id] = [];
     }
 
-    // Identify Foreign Keys for this table
     const fkMap = new Map<string, { parentTableId: string, parentColId: string }>();
     relationships.filter(r => r.sourceTableId === table.id).forEach(r => {
       fkMap.set(r.sourceColumnId, { parentTableId: r.targetTableId, parentColId: r.targetColumnId });
     });
 
-    // DETERMINE TARGET ROWS and DRIVING PARENT
     let targetRows = 0;
     const settings = table.genSettings || { mode: 'fixed', fixedCount: 100 };
     const drivingParentId = settings.mode === 'per_parent' ? settings.drivingParentTableId : undefined;
     
-    // Get driving parent IDs if per_parent mode
     let drivingParentIds: string[] = [];
     if (settings.mode === 'per_parent' && drivingParentId) {
-       // Find the PK column of the parent (assumed linked via relationship)
-       // Actually, we just need ANY valid ID from the parent's generated set.
-       // Usually we look up the column used in the relationship.
        const rel = relationships.find(r => r.sourceTableId === table.id && r.targetTableId === drivingParentId);
        if (rel && generatedDataStore[drivingParentId]?.[rel.targetColumnId]) {
          drivingParentIds = generatedDataStore[drivingParentId][rel.targetColumnId];
        } else {
-         // Fallback if relation not found (shouldn't happen if UI filters correctly) or parent has no data
-         // Check if data exists for any column in parent, as fallback
          const parentTableData = generatedDataStore[drivingParentId];
          if (parentTableData) {
             const firstCol = Object.keys(parentTableData)[0];
             if (firstCol) drivingParentIds = parentTableData[firstCol];
          }
-         
-         if (drivingParentIds.length === 0) {
-            console.warn(`Driving parent data not found for ${table.name}`);
-            settings.mode = 'fixed';
-            settings.fixedCount = 10;
-         }
        }
     }
 
-    // Determine Pre-calculated Row Count for AI Batching
-    if (settings.mode === 'fixed') {
-      targetRows = settings.fixedCount || 100;
-    } else {
-      // For per_parent, we estimate max needed (lazy approach: just generate batch by batch? No, AI needs batch)
-      // Let's calculate exact total needed first
-      targetRows = 0; // Will be derived during loop
-    }
-    
-    // If per_parent, we need to construct the loop structure first to know total rows for AI prompt
     interface GenerationJob {
-       drivingId?: string; // The ID of the parent if per_parent
-       parentRowIndex?: number; // The index of the parent row in the parent table
+       drivingId?: string;
+       parentRowIndex?: number;
        count: number;
     }
     const jobs: GenerationJob[] = [];
@@ -187,143 +152,132 @@ export const generateAndDownload = async (
           }
        });
     } else {
+       targetRows = settings.fixedCount || 100;
        jobs.push({ count: targetRows });
     }
 
-    // 2. Pre-fetch AI content
-    const aiColumns = table.columns.filter(c => c.rule.type === GenerationStrategyType.AI);
     const aiCache: Record<string, string[]> = {};
-    
+    const aiColumns = table.columns.filter(c => c.rule.type === GenerationStrategyType.AI);
+    const sortedAiColumns: Column[] = [];
+    const visited = new Set<string>();
+
+    const visit = (col: Column) => {
+      if (visited.has(col.id)) return;
+      const depId = col.rule.config?.dependentColumnId;
+      if (depId) {
+        const depCol = table.columns.find(c => c.id === depId);
+        if (depCol && depCol.rule.type === GenerationStrategyType.AI) {
+           visit(depCol);
+        }
+      }
+      visited.add(col.id);
+      sortedAiColumns.push(col);
+    };
+
+    aiColumns.forEach(visit);
+
     if (targetRows > 0) {
-      await Promise.all(aiColumns.map(async (col) => {
-        onProgress(`Generating AI content for ${table.name}.${col.name} (${targetRows} items)...`);
-        const prompt = col.rule.config?.aiPrompt || "Generate random values";
-        // AI Batching: 5000 max? simple implementation
-        aiCache[col.id] = await generateSyntheticDataBatch(prompt, targetRows, col.sampleValues);
-      }));
-    }
+      const nonAiColumns = table.columns.filter(c => c.rule.type !== GenerationStrategyType.AI);
+      for (const job of jobs) {
+        for (let k = 0; k < job.count; k++) {
+          const globalRowIdx = tableData[table.columns[0].id].length;
+          
+          // Registry to track which parent row index we've selected for this child row
+          const selectedParentIndices: Record<string, number> = {};
+          if (settings.mode === 'per_parent' && drivingParentId !== undefined && job.parentRowIndex !== undefined) {
+             selectedParentIndices[drivingParentId] = job.parentRowIndex;
+          }
 
-    // 3. Sort columns to ensure Dependencies (Dates) are handled correctly
-    const sortedColumns = [...table.columns].sort((a, b) => {
-       const aName = a.name.toLowerCase();
-       const bName = b.name.toLowerCase();
-       if (aName.includes('modified') || aName.includes('updated')) return 1;
-       if (bName.includes('modified') || bName.includes('updated')) return -1;
-       return 0;
-    });
+          const getSyncedParentIndex = (pId: string) => {
+            if (selectedParentIndices[pId] !== undefined) return selectedParentIndices[pId];
+            const pData = generatedDataStore[pId];
+            if (!pData) return -1;
+            const firstCol = Object.keys(pData)[0];
+            const len = pData[firstCol]?.length || 0;
+            const idx = len > 0 ? getRandomInt(0, len - 1) : -1;
+            selectedParentIndices[pId] = idx;
+            return idx;
+          };
 
-    // 4. Generate Rows
-    let globalRowIndex = 0;
-
-    for (const job of jobs) {
-       for (let k = 0; k < job.count; k++) {
-          for (const col of sortedColumns) {
-            // Check if this column is the FK to the Driving Parent
+          for (const col of nonAiColumns) {
             const fkInfo = fkMap.get(col.id);
-            
             if (fkInfo) {
-              // Is this the driving parent?
-              if (settings.mode === 'per_parent' && fkInfo.parentTableId === drivingParentId) {
-                 tableData[col.id].push(job.drivingId || "ERROR");
-                 continue;
-              }
-
-              // Normal FK logic (Random assignment from other parents)
-              const parentValues = generatedDataStore[fkInfo.parentTableId]?.[fkInfo.parentColId];
-              if (parentValues && parentValues.length > 0) {
-                tableData[col.id].push(getRandom(parentValues));
+              const pIdx = getSyncedParentIndex(fkInfo.parentTableId);
+              const pVals = generatedDataStore[fkInfo.parentTableId]?.[fkInfo.parentColId];
+              if (pIdx !== -1 && pVals && pVals[pIdx] !== undefined) {
+                tableData[col.id].push(pVals[pIdx]);
               } else {
-                 tableData[col.id].push("ORPHAN"); 
+                tableData[col.id].push("ORPHAN");
               }
               continue;
             }
 
-            // Special Date Logic (Time-Arrow)
             if (col.type === DataType.DATE) {
-              const lowerName = col.name.toLowerCase();
-              if (lowerName.includes('modified') || lowerName.includes('updated')) {
-                const createdCol = table.columns.find(c => 
-                  (c.name.toLowerCase().includes('created') || c.name.toLowerCase().includes('originated')) 
-                  && tableData[c.id][tableData[c.id].length] // This index is tricky, we push to array. Length is current index
-                );
-                // Actually we just pushed to tableData[col.id], so index is length-1
-                // Wait, we haven't pushed 'this' col yet.
-                // We need the value from the createdCol at the SAME index.
-                const currentIndex = tableData[col.id].length; 
-                const createdVal = createdCol ? tableData[createdCol.id][currentIndex] : null;
-
-                if (createdVal) {
-                   tableData[col.id].push(generateDate('future', createdVal));
-                } else {
-                   tableData[col.id].push(generateDate('random'));
-                }
-              } else {
-                tableData[col.id].push(generateDate('random'));
-              }
+              tableData[col.id].push(generateDate('random'));
+              continue;
+            }
+            if (col.type === DataType.REVISION) {
+              const schema = col.revisionSchema || "-, A, B, C";
+              const options = schema.split(',').map(s => s.trim()).filter(Boolean);
+              tableData[col.id].push(options.length ? getRandom(options) : "-");
               continue;
             }
 
             let val = "";
             switch (col.rule.type) {
-              case GenerationStrategyType.COPY:
-                val = col.sampleValues[globalRowIndex % col.sampleValues.length] || "";
+              case GenerationStrategyType.COPY: 
+                val = col.sampleValues[globalRowIdx % col.sampleValues.length] || ""; 
                 break;
-              case GenerationStrategyType.PATTERN:
-                val = generateId(col.rule.config?.pattern || "ID-#", globalRowIndex + 1);
+              case GenerationStrategyType.PATTERN: 
+                val = generateId(col.rule.config?.pattern || "ID-#", globalRowIdx + 1); 
                 break;
               case GenerationStrategyType.RANDOM:
                 const opts = col.rule.config?.options || ["A", "B", "C"];
-                if (col.isMultiValue) {
-                   const count = Math.floor(Math.random() * 3) + 1;
-                   const selected = [];
-                   for(let m=0; m<count; m++) selected.push(getRandom(opts));
-                   const uniqueSelected = Array.from(new Set(selected));
-                   val = uniqueSelected.join(col.rule.config?.delimiter || ',');
-                } else {
-                   val = getRandom(opts);
-                }
+                val = col.isMultiValue ? Array.from(new Set([getRandom(opts), getRandom(opts)])).join(col.rule.config?.delimiter || ',') : getRandom(opts);
                 break;
-              case GenerationStrategyType.AI:
-                val = aiCache[col.id][globalRowIndex] || "";
+              case GenerationStrategyType.REFERENCE:
+                const refId = col.rule.config?.referenceFileId;
+                const refFile = referenceFiles.find(rf => rf.id === refId);
+                if (refFile && refFile.values.length > 0) {
+                  val = getRandom(refFile.values);
+                } else {
+                  val = "MISSING_REF";
+                }
                 break;
               case GenerationStrategyType.LINKED:
-                const targetTableId = col.rule.config?.linkedTableId || settings.drivingParentTableId;
-                const targetColId = col.rule.config?.linkedColumnId;
-                
-                if (targetTableId && targetColId) {
-                    const sourceValues = generatedDataStore[targetTableId]?.[targetColId];
-                    
-                    if (sourceValues && sourceValues.length > 0) {
-                        // Logic: Linked (Strict) or Random?
-                        // If we are in per_parent mode AND the target table IS the driving parent
-                        // Then we use the SPECIFIC row corresponding to the loop.
-                        if (settings.mode === 'per_parent' && targetTableId === settings.drivingParentTableId && job.parentRowIndex !== undefined) {
-                             val = sourceValues[job.parentRowIndex] || "";
-                        } else {
-                             // Otherwise (Fixed mode, or linking to a non-driving table), pick Random.
-                             // This effectively acts as a "Foreign Key" generator.
-                             val = getRandom(sourceValues);
-                        }
-                    } else {
-                        val = ""; 
-                    }
+                const tTabId = col.rule.config?.linkedTableId || settings.drivingParentTableId;
+                const tColId = col.rule.config?.linkedColumnId;
+                if (tTabId && tColId) {
+                  const pIdx = getSyncedParentIndex(tTabId);
+                  const sVals = generatedDataStore[tTabId]?.[tColId];
+                  if (pIdx !== -1 && sVals && sVals[pIdx] !== undefined) {
+                    val = sVals[pIdx];
+                  }
                 }
                 break;
-              default:
-                val = "";
             }
             tableData[col.id].push(val);
           }
-          globalRowIndex++;
-       }
+        }
+      }
+
+      for (const col of sortedAiColumns) {
+        onProgress(`Generating AI content for ${table.name}.${col.name}...`);
+        const depId = col.rule.config?.dependentColumnId;
+        let contextValues: string[] = [];
+        if (depId) {
+          contextValues = tableData[depId] || aiCache[depId] || [];
+        }
+        const prompt = col.rule.config?.aiPrompt || "Generate random values";
+        aiCache[col.id] = await generateSyntheticDataBatch(prompt, targetRows, col.sampleValues, contextValues);
+        tableData[col.id] = aiCache[col.id];
+      }
     }
 
     generatedDataStore[table.id] = tableData;
 
-    // Convert to CSV
-    // Ensure we write columns in original order
     const csvHeader = table.columns.map(c => `"${c.name}"`).join(",");
-    const finalRowCount = tableData[table.columns[0].id].length;
+    const finalRowCount = tableData[table.columns[0].id]?.length || 0;
     const csvRows = [];
     for (let i = 0; i < finalRowCount; i++) {
       const row = table.columns.map(c => `"${(generatedDataStore[table.id][c.id][i] || "").replace(/"/g, '""')}"`).join(",");
@@ -334,7 +288,6 @@ export const generateAndDownload = async (
   }
 
   onProgress("Zipping files...");
-  
   const saveAsFunc = (FileSaver as any).saveAs || (FileSaver as any).default || FileSaver;
   const content = await zip.generateAsync({ type: "blob" });
   saveAsFunc(content, "synthetic_data.zip");

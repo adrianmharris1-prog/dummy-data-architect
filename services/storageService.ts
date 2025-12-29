@@ -1,3 +1,4 @@
+
 import { Project } from '../types';
 
 const STORAGE_KEY = 'synthetic_forge_projects';
@@ -44,7 +45,7 @@ export const createNewProject = (name: string): Project => {
     id: crypto.randomUUID(),
     name,
     lastModified: Date.now(),
-    state: { tables: [], relationships: [] },
+    state: { tables: [], relationships: [], referenceFiles: [] },
     currentStep: 1
   };
 };
