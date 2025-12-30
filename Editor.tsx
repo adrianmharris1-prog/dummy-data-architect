@@ -5,9 +5,9 @@ import * as XLSX from 'xlsx';
 import { 
   Upload, Table as TableIcon, Network, Settings, Download, 
   Plus, X, ChevronRight, ChevronLeft, FileSpreadsheet, Wand2, Database,
-  ArrowRight, ArrowLeft, Save, GripHorizontal, Move, Maximize2, Trash2, Link,
+  ArrowRight, ArrowLeft, Save, GripHorizontal, Move, Maximize2, Minimize2, Trash2, Link,
   Users, Layers, Hash, Eye, EyeOff, PanelLeftClose, PanelLeftOpen,
-  Sparkles, MessageSquare, AlertCircle, FileText
+  Sparkles, MessageSquare, AlertCircle, FileText, Trash
 } from 'lucide-react';
 import { Table, Column, Relationship, DataType, GenerationStrategyType, GenerationRule, Project, Cardinality, TableGenerationSettings, ReferenceFile } from './types';
 import { generateAndDownload } from './services/generatorService';
@@ -104,15 +104,20 @@ const FileUploadStep = ({
   onFilesUploaded, 
   onReferenceFilesUploaded,
   onDeleteReferenceFile,
+  onDeleteTable,
+  existingTables,
   existingReferenceFiles 
 }: { 
   onFilesUploaded: (tables: Table[]) => void, 
   onReferenceFilesUploaded: (files: ReferenceFile[]) => void,
   onDeleteReferenceFile: (id: string) => void,
+  onDeleteTable: (id: string) => void,
+  existingTables: Table[],
   existingReferenceFiles: ReferenceFile[]
 }) => {
   const [isDraggingData, setIsDraggingData] = useState(false);
   const [isDraggingRef, setIsDraggingRef] = useState(false);
+  const [expandedTable, setExpandedTable] = useState<'data' | 'ref' | null>(null);
 
   const detectColumnConfig = (name: string, samples: string[]): { type: DataType, isMultiValue: boolean, rule: GenerationRule, revisionSchema?: string } => {
     const lowerName = name.toLowerCase();
@@ -157,7 +162,6 @@ const FileUploadStep = ({
       };
     }
 
-    // Detect Revision Type
     if (lowerName.includes('rev') || lowerName.includes('revision')) {
        return {
          type: DataType.REVISION,
@@ -296,10 +300,7 @@ const FileUploadStep = ({
           const firstSheetName = workbook.SheetNames[0];
           const worksheet = workbook.Sheets[firstSheetName];
           const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
-          
-          // Take the first column of every row
           const values = jsonData.map(r => String(r[0])).filter(v => v !== 'undefined' && v !== 'null' && v !== '');
-          
           resolve({
             id: `ref-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
             name: fileName,
@@ -313,7 +314,6 @@ const FileUploadStep = ({
           skipEmptyLines: true,
           complete: (results) => {
             const rows = results.data as string[][];
-            // Take the first column of every row
             const values = rows.map(r => r[0]).filter(v => v !== undefined && v !== '');
             resolve({
               id: `ref-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
@@ -326,11 +326,9 @@ const FileUploadStep = ({
     });
   };
 
-  // Fixed type inference by using explicit FileList conversion and casting to File[]
   const handleDropData = async (e: React.DragEvent) => {
     e.preventDefault();
     setIsDraggingData(false);
-    // Explicitly cast to File[] to fix "Property 'name' does not exist on type 'unknown'"
     const files = (Array.from(e.dataTransfer.files) as File[]).filter((f) => {
       const ext = f.name?.split('.').pop()?.toLowerCase();
       return ext === 'csv' || ext === 'xlsx' || ext === 'xls';
@@ -339,7 +337,6 @@ const FileUploadStep = ({
     onFilesUploaded(tables);
   };
 
-  // Fixed type inference by using explicit FileList conversion and casting to File[]
   const handleDropRef = async (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -352,7 +349,6 @@ const FileUploadStep = ({
     onReferenceFilesUploaded(refs);
   };
 
-  // Fixed type inference by adding explicit type casting for Array.from
   const handleInputData = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
       const files = Array.from(e.target.files) as File[];
@@ -361,7 +357,6 @@ const FileUploadStep = ({
     }
   };
 
-  // Fixed type inference by adding explicit type casting for Array.from
   const handleInputRef = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
       const files = Array.from(e.target.files) as File[];
@@ -370,101 +365,153 @@ const FileUploadStep = ({
     }
   };
 
-  return (
-    <div className="flex-1 flex flex-col gap-8 p-12 bg-slate-50 overflow-y-auto items-center">
-      {/* Data Tables Section */}
-      <div className="w-full max-w-4xl">
-        <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
-          <TableIcon size={20} className="text-primary"/> Data Tables (Schemas)
-        </h3>
-        <div 
-          className={`w-full h-64 border-2 border-dashed rounded-2xl flex flex-col items-center justify-center transition-colors ${isDraggingData ? 'border-primary bg-primary/5' : 'border-slate-300 bg-white'}`}
-          onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setIsDraggingData(true); }}
-          onDragLeave={() => setIsDraggingData(false)}
-          onDrop={handleDropData}
-        >
-          <div className="w-16 h-16 bg-blue-50 text-blue-500 rounded-full flex items-center justify-center mb-4">
-            <Upload size={32} />
-          </div>
-          <p className="text-slate-800 font-medium mb-1">Drag & drop CSV/Excel here</p>
-          <p className="text-slate-500 text-sm mb-6 text-center">To define the structure of your generated data</p>
-          <input 
-            type="file" 
-            multiple 
-            accept=".csv,.xlsx,.xls" 
-            className="hidden" 
-            id="data-input"
-            onChange={handleInputData}
-          />
-          <label 
-            htmlFor="data-input" 
-            className="px-6 py-2.5 bg-primary hover:bg-blue-700 text-white rounded-lg font-medium cursor-pointer transition-colors"
-          >
-            Browse Schemas
-          </label>
-        </div>
-      </div>
+  const toggleExpand = (type: 'data' | 'ref') => {
+    setExpandedTable(prev => prev === type ? null : type);
+  };
 
-      {/* Reference Files Section */}
-      <div className="w-full max-w-4xl">
-        <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
-          <FileText size={20} className="text-amber-500"/> Reference Files (Seed Data)
-        </h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+  return (
+    <div className="flex-1 flex flex-col p-6 bg-slate-50 overflow-hidden items-center">
+      <div className="w-full max-w-6xl flex flex-col gap-6 h-full">
+        
+        {/* Data Tables Section */}
+        {(!expandedTable || expandedTable === 'data') && (
           <div 
-            className={`h-48 border-2 border-dashed rounded-2xl flex flex-col items-center justify-center transition-colors ${isDraggingRef ? 'border-amber-500 bg-amber-50' : 'border-slate-300 bg-white'}`}
+            className={`flex-1 flex flex-col bg-white rounded-xl border transition-all overflow-hidden shadow-sm ${isDraggingData ? 'border-primary bg-primary/5 ring-2 ring-primary/20' : 'border-slate-200'} ${expandedTable === 'data' ? 'h-full' : ''}`}
+            onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setIsDraggingData(true); }}
+            onDragLeave={() => setIsDraggingData(false)}
+            onDrop={handleDropData}
+          >
+            <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+              <h3 className="text-md font-bold text-slate-800 flex items-center gap-2">
+                <TableIcon size={18} className="text-primary"/> Data Tables (Schemas)
+                <span className="text-xs font-normal text-slate-400 bg-white border border-slate-200 px-1.5 py-0.5 rounded-md ml-2">{existingTables.length}</span>
+              </h3>
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={() => toggleExpand('data')} 
+                  className="p-1.5 text-slate-500 hover:bg-white border border-transparent hover:border-slate-200 rounded-md transition-all"
+                  title={expandedTable === 'data' ? "Collapse" : "Expand"}
+                >
+                  {expandedTable === 'data' ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+                </button>
+                <div className="w-px h-4 bg-slate-200 mx-1"></div>
+                <input type="file" multiple accept=".csv,.xlsx,.xls" className="hidden" id="data-input" onChange={handleInputData} />
+                <label htmlFor="data-input" className="flex items-center gap-2 px-3 py-1.5 bg-white border border-slate-300 text-slate-700 rounded-lg text-xs font-medium cursor-pointer hover:bg-slate-50 transition-colors shadow-sm">
+                  <Plus size={14} /> Upload
+                </label>
+              </div>
+            </div>
+            <div className="flex-1 overflow-auto">
+              {existingTables.length === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center text-slate-400 p-8">
+                  <Upload size={32} className="mb-2 opacity-20" />
+                  <p className="text-center font-medium text-sm">Drag and drop CSV or Excel files here to define schemas</p>
+                </div>
+              ) : (
+                <table className="w-full text-left table-fixed">
+                  <thead className="bg-slate-50 text-slate-500 font-medium border-b border-slate-200 text-[10px] uppercase tracking-wider sticky top-0 z-10">
+                    <tr>
+                      <th className="px-4 py-2 w-1/2">File Name</th>
+                      <th className="px-4 py-2 w-1/3">Status</th>
+                      <th className="px-4 py-2 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {existingTables.map(t => (
+                      <tr key={t.id} className="hover:bg-slate-50/50 group">
+                        <td className="px-4 py-1.5 font-medium text-slate-700 truncate text-xs">
+                          <div className="flex items-center gap-2">
+                             <FileSpreadsheet size={14} className="text-blue-500 flex-shrink-0" />
+                             <span className="truncate">{t.name}</span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-1.5 text-slate-400 text-[10px]">
+                          {t.columns.length} columns
+                        </td>
+                        <td className="px-4 py-1.5 text-right">
+                          <button onClick={() => onDeleteTable(t.id)} className="p-1 text-slate-300 hover:text-red-600 transition-colors opacity-0 group-hover:opacity-100">
+                            <Trash2 size={14} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Reference Files Section */}
+        {(!expandedTable || expandedTable === 'ref') && (
+          <div 
+            className={`flex-1 flex flex-col bg-white rounded-xl border transition-all overflow-hidden shadow-sm ${isDraggingRef ? 'border-amber-500 bg-amber-50 ring-2 ring-amber-500/20' : 'border-slate-200'} ${expandedTable === 'ref' ? 'h-full' : ''}`}
             onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setIsDraggingRef(true); }}
             onDragLeave={() => setIsDraggingRef(false)}
             onDrop={handleDropRef}
           >
-            <div className="w-12 h-12 bg-amber-50 text-amber-500 rounded-full flex items-center justify-center mb-2">
-              <Plus size={24} />
+            <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+              <h3 className="text-md font-bold text-slate-800 flex items-center gap-2">
+                <FileText size={18} className="text-amber-500"/> Reference Files (Seed Data for specific attributes)
+                <span className="text-xs font-normal text-slate-400 bg-white border border-slate-200 px-1.5 py-0.5 rounded-md ml-2">{existingReferenceFiles.length}</span>
+              </h3>
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={() => toggleExpand('ref')} 
+                  className="p-1.5 text-slate-500 hover:bg-white border border-transparent hover:border-slate-200 rounded-md transition-all"
+                  title={expandedTable === 'ref' ? "Collapse" : "Expand"}
+                >
+                  {expandedTable === 'ref' ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+                </button>
+                <div className="w-px h-4 bg-slate-200 mx-1"></div>
+                <input type="file" multiple accept=".csv,.xlsx,.xls" className="hidden" id="ref-input" onChange={handleInputRef} />
+                <label htmlFor="ref-input" className="flex items-center gap-2 px-3 py-1.5 bg-white border border-slate-300 text-slate-700 rounded-lg text-xs font-medium cursor-pointer hover:bg-slate-50 transition-colors shadow-sm">
+                  <Plus size={14} /> Upload
+                </label>
+              </div>
             </div>
-            <p className="text-slate-600 text-xs text-center px-4 mb-4">Drop CSV/Excel here (uses 1st column as reference)</p>
-            <input 
-              type="file" 
-              multiple 
-              accept=".csv,.xlsx,.xls" 
-              className="hidden" 
-              id="ref-input"
-              onChange={handleInputRef}
-            />
-            <label 
-              htmlFor="ref-input" 
-              className="px-4 py-1.5 border border-amber-200 text-amber-600 hover:bg-amber-50 rounded-lg text-xs font-medium cursor-pointer transition-colors"
-            >
-              Add Reference Files
-            </label>
-          </div>
-
-          <div className="bg-white rounded-2xl border border-slate-200 p-4 flex flex-col max-h-48">
-            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Uploaded References</h4>
-            <div className="flex-1 overflow-y-auto space-y-2">
+            <div className="flex-1 overflow-auto">
               {existingReferenceFiles.length === 0 ? (
-                <p className="text-xs text-slate-400 italic">No reference files uploaded yet.</p>
+                <div className="h-full flex flex-col items-center justify-center text-slate-400 p-8">
+                  <Database size={32} className="mb-2 opacity-20" />
+                  <p className="text-center font-medium text-sm">Drag and drop CSV or Excel files here to use as seed data</p>
+                </div>
               ) : (
-                existingReferenceFiles.map(rf => (
-                  <div key={rf.id} className="flex items-center justify-between p-2 bg-slate-50 rounded border border-slate-100 text-xs group">
-                    <div className="flex flex-col truncate flex-1">
-                      <span className="truncate font-medium text-slate-700">{rf.name}</span>
-                      <span className="text-[10px] text-slate-400">{rf.values.length} rows</span>
-                    </div>
-                    <button 
-                      onClick={() => onDeleteReferenceFile(rf.id)}
-                      className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-md transition-all opacity-0 group-hover:opacity-100"
-                      title="Remove Reference File"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                ))
+                <table className="w-full text-left table-fixed">
+                  <thead className="bg-slate-50 text-slate-500 font-medium border-b border-slate-200 text-[10px] uppercase tracking-wider sticky top-0 z-10">
+                    <tr>
+                      <th className="px-4 py-2 w-1/2">File Name</th>
+                      <th className="px-4 py-2 w-1/3">Data Volume</th>
+                      <th className="px-4 py-2 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {existingReferenceFiles.map(rf => (
+                      <tr key={rf.id} className="hover:bg-slate-50/50 group">
+                        <td className="px-4 py-1.5 font-medium text-slate-700 truncate text-xs">
+                          <div className="flex items-center gap-2">
+                             <FileText size={14} className="text-amber-500 flex-shrink-0" />
+                             <span className="truncate">{rf.name}</span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-1.5 text-slate-400 text-[10px]">
+                          {rf.values.length} rows
+                        </td>
+                        <td className="px-4 py-1.5 text-right">
+                          <button onClick={() => onDeleteReferenceFile(rf.id)} className="p-1 text-slate-300 hover:text-red-600 transition-colors opacity-0 group-hover:opacity-100">
+                            <Trash2 size={14} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               )}
             </div>
           </div>
-        </div>
-      </div>
+        )}
 
-      <p className="mt-4 text-xs text-slate-400">Supported formats: CSV, XLSX, XLS. All data is processed locally.</p>
+      </div>
     </div>
   );
 };
@@ -599,7 +646,6 @@ const RelationshipMapper = ({
   const colRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const tableRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const tableScrollRefs = useRef<Record<string, HTMLDivElement | null>>({});
-  
   const tableScrollTimeouts = useRef<Record<string, any>>({});
   const canvasScrollTimeout = useRef<any>(null);
 
@@ -618,7 +664,6 @@ const RelationshipMapper = ({
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, relId: string } | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  
   const [selectedToolboxIds, setSelectedToolboxIds] = useState<Set<string>>(new Set());
   const lastSelectedIdRef = useRef<string | null>(null);
 
@@ -750,7 +795,6 @@ const RelationshipMapper = ({
   const handleToolboxClick = (e: React.MouseEvent, id: string, allIds: string[]) => {
     e.stopPropagation();
     const newSelected = new Set(selectedToolboxIds);
-
     if (e.shiftKey && lastSelectedIdRef.current) {
         const start = allIds.indexOf(lastSelectedIdRef.current);
         const end = allIds.indexOf(id);
@@ -788,24 +832,18 @@ const RelationshipMapper = ({
   const handleCanvasDrop = (e: React.DragEvent) => {
     e.preventDefault();
     if (!containerRef.current) return;
-
     const tableIdsJson = e.dataTransfer.getData('tableIds');
     let ids: string[] = [];
-    try {
-        ids = JSON.parse(tableIdsJson);
-    } catch(e) {
+    try { ids = JSON.parse(tableIdsJson); } catch(e) {
         const single = e.dataTransfer.getData('tableId');
         if (single) ids = [single];
     }
-    
     if (ids.length === 0) return;
-
     const containerRect = containerRef.current.getBoundingClientRect();
     const scrollTop = containerRef.current.scrollTop;
     const scrollLeft = containerRef.current.scrollLeft;
     const dropX = e.clientX - containerRect.left + scrollLeft;
     const dropY = e.clientY - containerRect.top + scrollTop;
-
     const updates: Table[] = [];
     ids.forEach((tid, index) => {
         const table = tables.find(t => t.id === tid);
@@ -823,10 +861,7 @@ const RelationshipMapper = ({
             });
         }
     });
-
-    if (updates.length > 0) {
-        onUpdateTables(updates);
-    }
+    if (updates.length > 0) onUpdateTables(updates);
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -922,11 +957,8 @@ const RelationshipMapper = ({
               const c1x = startSide === 'right' ? start.x + controlOffset : start.x - controlOffset;
               const c2x = endSide === 'right' ? end.x + controlOffset : end.x - controlOffset;
               const path = `M ${start.x} ${start.y} C ${c1x} ${start.y}, ${c2x} ${end.y}, ${end.x} ${end.y}`;
-              
-              // Correct labels based on dependency direction: Target is Parent (1), Source is Child (N)
               const startLabel = rel.cardinality === '1:N' || rel.cardinality === 'N:M' ? '∞' : '1';
               const endLabel = rel.cardinality === '1:1' || rel.cardinality === '1:N' ? '1' : '∞';
-
               return (
                 <g key={rel.id} className="pointer-events-auto">
                   <path d={path} stroke="transparent" strokeWidth="20" fill="none" className="cursor-pointer" onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setContextMenu({ x: e.clientX, y: e.clientY, relId: rel.id }); }}/>
@@ -962,7 +994,6 @@ const RelationshipMapper = ({
                         {dragState?.type === 'connect' && dragState.tableId !== table.id && <div className="absolute inset-0 z-50 rounded border border-transparent hover:border-blue-500 hover:bg-blue-500/10 cursor-pointer" onMouseUp={(e) => { 
                                e.stopPropagation(); 
                                if (dragState.colId) {
-                                 // SWAP FIX: dragState (drag start) is Parent (Target), table (drop end) is Child (Source)
                                  onAddRelationship({
                                    id: `rel-${Date.now()}`,
                                    sourceTableId: table.id,
@@ -992,57 +1023,25 @@ const RelationshipMapper = ({
              <div className="h-px bg-slate-100 my-1" /><button onClick={() => handleContextAction('delete')} className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"><Trash2 size={14} /> Delete</button>
           </div>
         )}
-        <div className="absolute top-4 right-4 w-64 bg-white/90 backdrop-blur-sm rounded-lg shadow-lg border border-slate-200 p-3 z-40 max-h-64 overflow-y-auto">
-          <h4 className="font-semibold text-slate-800 mb-2 text-xs uppercase tracking-wide">Connections</h4>
-          {relationships.length === 0 && <p className="text-xs text-slate-400">Drag column handle to connect.</p>}
-          <div className="space-y-1">
-            {relationships.map(rel => {
-                 const srcT = tables.find(t => t.id === rel.sourceTableId);
-                 const tgtT = tables.find(t => t.id === rel.targetTableId);
-                 if (!srcT?.ui || srcT.ui.isVisible === false || !tgtT?.ui || tgtT.ui.isVisible === false) return null;
-                 return (
-                   <div key={rel.id} className="flex items-center justify-between text-xs p-1.5 bg-slate-50 rounded border border-slate-100 group">
-                      <div className="flex flex-col overflow-hidden w-full">
-                        <div className="flex items-center gap-1 mb-0.5"><span className="font-medium text-blue-600 truncate max-w-[80px]">{tgtT?.name}</span><ArrowRight size={10} className="text-slate-300 flex-shrink-0" /><span className="font-medium text-blue-600 truncate max-w-[80px]">{srcT?.name}</span></div>
-                        <div className="flex items-center justify-between text-slate-500"><span className="truncate max-w-[80px]">{tgtT?.columns.find(c => c.id === rel.targetColumnId)?.name}</span><span className="text-[10px] bg-slate-200 px-1 rounded">{rel.cardinality || '1:N'}</span><span className="truncate max-w-[80px] text-right">{srcT?.columns.find(c => c.id === rel.sourceColumnId)?.name}</span></div>
-                      </div>
-                      <button onClick={() => onRemoveRelationship(rel.id)} className="ml-2 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"><X size={14} /></button>
-                   </div>
-                 );
-              })}
-          </div>
-        </div>
       </div>
     </div>
   );
 };
 
 // 5. Rules Configuration
-const RulesConfiguration = ({ 
-  tables, 
-  relationships, 
-  referenceFiles,
-  onUpdateTable 
-}: { 
-  tables: Table[], 
-  relationships: Relationship[], 
-  referenceFiles: ReferenceFile[],
-  onUpdateTable: (t: Table) => void 
-}) => {
+const RulesConfiguration = ({ tables, relationships, referenceFiles, onUpdateTable }: { tables: Table[], relationships: Relationship[], referenceFiles: ReferenceFile[], onUpdateTable: (t: Table) => void }) => {
   const [selectedTableId, setSelectedTableId] = useState<string>(tables[0]?.id || '');
   const activeTable = tables.find(t => t.id === selectedTableId);
-
   const handleRuleChange = (colId: string, rule: GenerationRule) => {
     if (!activeTable) return;
     const newCols = activeTable.columns.map(c => c.id === colId ? { ...c, rule } : c);
     onUpdateTable({ ...activeTable, columns: newCols });
   };
-
   const handleSettingsChange = (settings: TableGenerationSettings) => {
     if (!activeTable) return;
     onUpdateTable({ ...activeTable, genSettings: settings });
   };
-
+  
   const getConnectedTables = (currentTableId: string) => {
     const connectedIds = new Set<string>();
     relationships.forEach(r => {
@@ -1051,7 +1050,7 @@ const RulesConfiguration = ({
     });
     return tables.filter(t => connectedIds.has(t.id));
   };
-
+  
   const connectedTables = activeTable ? getConnectedTables(activeTable.id) : [];
 
   return (
@@ -1069,7 +1068,6 @@ const RulesConfiguration = ({
           </button>
         ))}
       </div>
-
       <div className="flex-1 overflow-y-auto bg-slate-50 p-8">
         {activeTable ? (
           <div className="max-w-4xl mx-auto space-y-6">
@@ -1080,11 +1078,7 @@ const RulesConfiguration = ({
                <div className="grid grid-cols-2 gap-6">
                  <div>
                    <label className="block text-sm font-medium text-slate-700 mb-2">Generation Mode</label>
-                   <select 
-                     value={activeTable.genSettings?.mode || 'fixed'}
-                     onChange={(e) => handleSettingsChange({ ...activeTable.genSettings!, mode: e.target.value as any })}
-                     className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none"
-                   >
+                   <select value={activeTable.genSettings?.mode || 'fixed'} onChange={(e) => handleSettingsChange({ ...activeTable.genSettings!, mode: e.target.value as any })} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none">
                      <option value="fixed">Fixed Row Count</option>
                      <option value="per_parent">Per Parent Row (Loop)</option>
                    </select>
@@ -1092,67 +1086,38 @@ const RulesConfiguration = ({
                  {(!activeTable.genSettings?.mode || activeTable.genSettings.mode === 'fixed') && (
                     <div>
                       <label className="block text-sm font-medium text-slate-700 mb-2">Row Count</label>
-                      <input 
-                        type="number" 
-                        value={activeTable.genSettings?.fixedCount ?? 100}
-                        onChange={(e) => handleSettingsChange({ ...activeTable.genSettings!, fixedCount: parseInt(e.target.value) || 0, mode: 'fixed' })}
-                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none"
-                      />
+                      <input type="number" value={activeTable.genSettings?.fixedCount ?? 100} onChange={(e) => handleSettingsChange({ ...activeTable.genSettings!, fixedCount: parseInt(e.target.value) || 0, mode: 'fixed' })} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none" />
                     </div>
                  )}
                  {activeTable.genSettings?.mode === 'per_parent' && (
                     <>
                        <div>
                           <label className="block text-sm font-medium text-slate-700 mb-2">Driving Parent Table</label>
-                          <select
-                            value={activeTable.genSettings?.drivingParentTableId || ''}
-                            onChange={(e) => handleSettingsChange({ ...activeTable.genSettings!, drivingParentTableId: e.target.value, mode: 'per_parent', fixedCount: 0 })}
-                            className={`w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none ${connectedTables.length === 0 ? 'border-red-300 bg-red-50' : 'border-slate-300'}`}
-                          >
+                          <select value={activeTable.genSettings?.drivingParentTableId || ''} onChange={(e) => handleSettingsChange({ ...activeTable.genSettings!, drivingParentTableId: e.target.value, mode: 'per_parent', fixedCount: 0 })} className={`w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none ${connectedTables.length === 0 ? 'border-red-300 bg-red-50' : 'border-slate-300'}`}>
                              <option value="">Select Parent Table...</option>
-                             {connectedTables.map(t => (
-                               <option key={t.id} value={t.id}>{t.name}</option>
-                             ))}
+                             {connectedTables.map(t => ( <option key={t.id} value={t.id}>{t.name}</option> ))}
                           </select>
-                          {connectedTables.length === 0 && (
-                            <div className="mt-2 flex items-start gap-1 text-red-600 text-[10px] leading-tight">
-                              <AlertCircle size={10} className="mt-0.5 flex-shrink-0" />
-                              <span>No relationships found. Define connections in the <strong>Relations</strong> tab first.</span>
-                            </div>
-                          )}
                        </div>
                        <div className="flex gap-4">
                           <div className="flex-1">
                             <label className="block text-sm font-medium text-slate-700 mb-2">Min / Parent</label>
-                            <input 
-                              type="number"
-                              value={activeTable.genSettings?.minPerParent ?? 1}
-                              onChange={(e) => handleSettingsChange({ ...activeTable.genSettings!, minPerParent: parseInt(e.target.value) || 0, mode: 'per_parent', fixedCount: 0 })}
-                              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none"
-                            />
+                            <input type="number" value={activeTable.genSettings?.minPerParent ?? 1} onChange={(e) => handleSettingsChange({ ...activeTable.genSettings!, minPerParent: parseInt(e.target.value) || 0, mode: 'per_parent', fixedCount: 0 })} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none" />
                           </div>
                           <div className="flex-1">
                             <label className="block text-sm font-medium text-slate-700 mb-2">Max / Parent</label>
-                            <input 
-                              type="number"
-                              value={activeTable.genSettings?.maxPerParent ?? 5}
-                              onChange={(e) => handleSettingsChange({ ...activeTable.genSettings!, maxPerParent: parseInt(e.target.value) || 0, mode: 'per_parent', fixedCount: 0 })}
-                              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none"
-                            />
+                            <input type="number" value={activeTable.genSettings?.maxPerParent ?? 5} onChange={(e) => handleSettingsChange({ ...activeTable.genSettings!, maxPerParent: parseInt(e.target.value) || 0, mode: 'per_parent', fixedCount: 0 })} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none" />
                           </div>
                        </div>
                     </>
                  )}
                </div>
             </div>
-
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
                <div className="px-6 py-4 border-b border-slate-100"><h3 className="text-lg font-semibold text-slate-800">Column Rules</h3></div>
                <div className="divide-y divide-slate-100">
                  {activeTable.columns.map(col => {
                    const currentLinkedTableId = col.rule.config?.linkedTableId;
                    const linkedTable = tables.find(t => t.id === currentLinkedTableId);
-
                    return (
                    <div key={col.id} className="p-6 hover:bg-slate-50 transition-colors">
                       <div className="flex items-start gap-4 mb-4">
@@ -1168,14 +1133,8 @@ const RulesConfiguration = ({
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pl-14">
                          <div>
                             <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Strategy</label>
-                            <select 
-                              value={col.rule.type}
-                              onChange={(e) => handleRuleChange(col.id, { ...col.rule, type: e.target.value as GenerationStrategyType })}
-                              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none"
-                            >
-                               {Object.values(GenerationStrategyType).map(t => (
-                                 <option key={t} value={t}>{t}</option>
-                               ))}
+                            <select value={col.rule.type} onChange={(e) => handleRuleChange(col.id, { ...col.rule, type: e.target.value as GenerationStrategyType })} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none">
+                               {Object.values(GenerationStrategyType).map(t => ( <option key={t} value={t}>{t}</option> ))}
                             </select>
                          </div>
                          <div className="flex-1">
@@ -1194,19 +1153,10 @@ const RulesConfiguration = ({
                             {col.rule.type === GenerationStrategyType.REFERENCE && (
                                <div>
                                   <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Select Reference File</label>
-                                  <select 
-                                    value={col.rule.config?.referenceFileId || ''} 
-                                    onChange={(e) => handleRuleChange(col.id, { ...col.rule, config: { ...col.rule.config, referenceFileId: e.target.value } })}
-                                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none"
-                                  >
+                                  <select value={col.rule.config?.referenceFileId || ''} onChange={(e) => handleRuleChange(col.id, { ...col.rule, config: { ...col.rule.config, referenceFileId: e.target.value } })} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none">
                                     <option value="">Select File...</option>
-                                    {referenceFiles.map(rf => (
-                                      <option key={rf.id} value={rf.id}>{rf.name} ({rf.values.length} rows)</option>
-                                    ))}
+                                    {referenceFiles.map(rf => ( <option key={rf.id} value={rf.id}>{rf.name} ({rf.values.length} rows)</option> ))}
                                   </select>
-                                  {referenceFiles.length === 0 && (
-                                    <p className="mt-1 text-[10px] text-amber-600 italic">No reference files uploaded. Go back to Upload tab.</p>
-                                  )}
                                </div>
                             )}
                             {col.rule.type === GenerationStrategyType.AI && (
@@ -1217,17 +1167,10 @@ const RulesConfiguration = ({
                                   </div>
                                   <div>
                                      <label className="block text-xs font-semibold text-slate-500 uppercase mb-1 flex items-center gap-1"><Link size={12} className="text-blue-500"/> Context Column (Optional)</label>
-                                     <select 
-                                        value={col.rule.config?.dependentColumnId || ''} 
-                                        onChange={(e) => handleRuleChange(col.id, { ...col.rule, config: { ...col.rule.config, dependentColumnId: e.target.value } })}
-                                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none"
-                                     >
+                                     <select value={col.rule.config?.dependentColumnId || ''} onChange={(e) => handleRuleChange(col.id, { ...col.rule, config: { ...col.rule.config, dependentColumnId: e.target.value } })} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none">
                                         <option value="">None (Independent)</option>
-                                        {activeTable.columns.filter(c => c.id !== col.id).map(c => (
-                                          <option key={c.id} value={c.id}>{c.name}</option>
-                                        ))}
+                                        {activeTable.columns.filter(c => c.id !== col.id).map(c => ( <option key={c.id} value={c.id}>{c.name}</option> ))}
                                      </select>
-                                     <p className="mt-1 text-[10px] text-slate-400 italic">Gemini will use values from this column as context for each row.</p>
                                   </div>
                                </div>
                             )}
@@ -1239,34 +1182,24 @@ const RulesConfiguration = ({
                                        {connectedTables.length === 0 && <span className="text-red-500 text-[10px] italic normal-case">No connections</span>}
                                     </label>
                                     <select 
-                                      value={currentLinkedTableId || ''}
-                                      onChange={(e) => {
-                                        handleRuleChange(col.id, { 
-                                          ...col.rule, 
-                                          config: { ...col.rule.config, linkedTableId: e.target.value, linkedColumnId: '' } 
-                                        });
-                                      }}
+                                      value={currentLinkedTableId || ''} 
+                                      onChange={(e) => { handleRuleChange(col.id, { ...col.rule, config: { ...col.rule.config, linkedTableId: e.target.value, linkedColumnId: '' } }); }} 
                                       className={`w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none ${connectedTables.length === 0 ? 'border-red-300 bg-red-50' : 'border-slate-300'}`}
                                     >
                                       <option value="">Select Connected Table...</option>
-                                      {connectedTables.map(t => (
-                                        <option key={t.id} value={t.id}>{t.name}</option>
-                                      ))}
+                                      {connectedTables.map(t => ( <option key={t.id} value={t.id}>{t.name}</option> ))}
                                     </select>
                                   </div>
-                                  
                                   <div>
                                     <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Source Column</label>
                                     <select 
-                                      value={col.rule.config?.linkedColumnId || ''}
-                                      onChange={(e) => handleRuleChange(col.id, { ...col.rule, config: { ...col.rule.config, linkedColumnId: e.target.value } })}
-                                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none disabled:bg-slate-50 disabled:text-slate-400"
+                                      value={col.rule.config?.linkedColumnId || ''} 
+                                      onChange={(e) => handleRuleChange(col.id, { ...col.rule, config: { ...col.rule.config, linkedColumnId: e.target.value } })} 
+                                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none disabled:bg-slate-50 disabled:text-slate-400" 
                                       disabled={!currentLinkedTableId}
                                     >
                                       <option value="">Select Column...</option>
-                                      {linkedTable?.columns.map(pc => (
-                                        <option key={pc.id} value={pc.id}>{pc.name}</option>
-                                      ))}
+                                      {linkedTable?.columns.map(pc => ( <option key={pc.id} value={pc.id}>{pc.name}</option> ))}
                                     </select>
                                   </div>
                                </div>
@@ -1278,9 +1211,7 @@ const RulesConfiguration = ({
                </div>
             </div>
           </div>
-        ) : (
-          <div className="flex-1 flex items-center justify-center text-slate-400 italic">Select a table to configure rules.</div>
-        )}
+        ) : ( <div className="flex-1 flex items-center justify-center text-slate-400 italic">Select a table to configure rules.</div> )}
       </div>
     </div>
   );
@@ -1290,22 +1221,13 @@ const RulesConfiguration = ({
 const ExportPanel = ({ tables, relationships, referenceFiles }: { tables: Table[], relationships: Relationship[], referenceFiles: ReferenceFile[] }) => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [progress, setProgress] = useState("");
-  
   const handleGenerate = async () => {
     setIsGenerating(true); 
     setProgress("Starting...");
-    try { 
-      await generateAndDownload(tables, relationships, referenceFiles, setProgress); 
-    } 
-    catch (e) { 
-      console.error(e); 
-      setProgress("Error occurred during generation."); 
-    } 
-    finally { 
-      setTimeout(() => { setIsGenerating(false); setProgress(""); }, 2000); 
-    }
+    try { await generateAndDownload(tables, relationships, referenceFiles, setProgress); } 
+    catch (e) { console.error(e); setProgress("Error occurred during generation."); } 
+    finally { setTimeout(() => { setIsGenerating(false); setProgress(""); }, 2000); }
   };
-
   return (
     <div className="flex-1 flex flex-col items-center justify-center bg-slate-50 p-12">
       <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-8 max-w-md w-full text-center">
@@ -1322,60 +1244,59 @@ const ExportPanel = ({ tables, relationships, referenceFiles }: { tables: Table[
 const Editor = ({ project, onSave, onBack }: { project: Project, onSave: (p: Project) => void, onBack: () => void }) => {
   const [localProject, setLocalProject] = useState<Project>(project);
   useEffect(() => { setLocalProject(project); }, [project.id]);
-  
   const handleUpdate = (updates: Partial<Project>) => { 
     const updated = { ...localProject, ...updates }; 
     setLocalProject(updated); 
     onSave(updated); 
   };
-
   const handleFilesUploaded = (newTables: Table[]) => { 
     const mergedTables = [...localProject.state.tables, ...newTables]; 
-    handleUpdate({ state: { ...localProject.state, tables: mergedTables }, currentStep: 2 }); 
+    handleUpdate({ state: { ...localProject.state, tables: mergedTables } }); 
   };
-
   const handleReferenceFilesUploaded = (newRefs: ReferenceFile[]) => {
     const mergedRefs = [...(localProject.state.referenceFiles || []), ...newRefs];
     handleUpdate({ state: { ...localProject.state, referenceFiles: mergedRefs } });
   };
-
   const handleDeleteReferenceFile = (id: string) => {
     const updatedRefs = (localProject.state.referenceFiles || []).filter(rf => rf.id !== id);
     handleUpdate({ state: { ...localProject.state, referenceFiles: updatedRefs } });
   };
-
+  const handleDeleteTable = (id: string) => {
+    const updatedTables = localProject.state.tables.filter(t => t.id !== id);
+    const updatedRels = localProject.state.relationships.filter(r => r.sourceTableId !== id && r.targetTableId !== id);
+    handleUpdate({ state: { ...localProject.state, tables: updatedTables, relationships: updatedRels } });
+  };
   const handleUpdateTable = (updatedTable: Table) => { 
     const newTables = localProject.state.tables.map(t => t.id === updatedTable.id ? updatedTable : t); 
     handleUpdate({ state: { ...localProject.state, tables: newTables } }); 
   };
-
   const handleUpdateTables = (updatedTables: Table[]) => { 
     const updatesMap = new Map(updatedTables.map(t => [t.id, t])); 
     const newTables = localProject.state.tables.map(t => updatesMap.get(t.id) || t); 
     handleUpdate({ state: { ...localProject.state, tables: newTables } }); 
   };
-
   const handleCanvasScroll = (x: number, y: number) => { 
     handleUpdate({ state: { ...localProject.state, canvasScroll: { x, y } } }); 
   };
-
+  
   const syncTableRules = (tables: Table[], rel: Relationship): Table[] => {
-    if (rel.cardinality !== '1:N') return tables;
-    // For 1:N, Target is Parent (1), Source is Child (N)
+    // Both 1:1 and 1:N imply the source column is a link to the target
+    if (rel.cardinality === 'N:M') return tables;
+    
     return tables.map(t => {
       if (t.id === rel.sourceTableId) {
         const updatedCols = t.columns.map(c => {
           if (c.id === rel.sourceColumnId) {
             return {
               ...c,
-              rule: {
-                ...c.rule,
-                type: GenerationStrategyType.LINKED,
-                config: {
-                  ...c.rule.config,
-                  linkedTableId: rel.targetTableId,
-                  linkedColumnId: rel.targetColumnId
-                }
+              rule: { 
+                ...c.rule, 
+                type: GenerationStrategyType.LINKED, 
+                config: { 
+                  ...c.rule.config, 
+                  linkedTableId: rel.targetTableId, 
+                  linkedColumnId: rel.targetColumnId 
+                } 
               }
             };
           }
@@ -1389,38 +1310,18 @@ const Editor = ({ project, onSave, onBack }: { project: Project, onSave: (p: Pro
 
   const handleAddRelationship = (rel: Relationship) => {
     const updatedTables = syncTableRules(localProject.state.tables, rel);
-    handleUpdate({ 
-      state: { 
-        ...localProject.state, 
-        relationships: [...localProject.state.relationships, rel],
-        tables: updatedTables
-      } 
-    });
+    handleUpdate({ state: { ...localProject.state, relationships: [...localProject.state.relationships, rel], tables: updatedTables } });
   };
-
   const handleRemoveRelationship = (id: string) => {
-    handleUpdate({ 
-      state: { 
-        ...localProject.state, 
-        relationships: localProject.state.relationships.filter(r => r.id !== id) 
-      } 
-    });
+    handleUpdate({ state: { ...localProject.state, relationships: localProject.state.relationships.filter(r => r.id !== id) } });
   };
-
   const handleUpdateRelationship = (rel: Relationship) => {
     const updatedTables = syncTableRules(localProject.state.tables, rel);
-    handleUpdate({ 
-      state: { 
-        ...localProject.state, 
-        relationships: localProject.state.relationships.map(r => r.id === rel.id ? rel : r),
-        tables: updatedTables
-      } 
-    });
+    handleUpdate({ state: { ...localProject.state, relationships: localProject.state.relationships.map(r => r.id === rel.id ? rel : r), tables: updatedTables } });
   };
-
   const renderStep = () => {
     switch (localProject.currentStep) {
-      case 1: return <FileUploadStep onFilesUploaded={handleFilesUploaded} onReferenceFilesUploaded={handleReferenceFilesUploaded} onDeleteReferenceFile={handleDeleteReferenceFile} existingReferenceFiles={localProject.state.referenceFiles || []} />;
+      case 1: return <FileUploadStep onFilesUploaded={handleFilesUploaded} onReferenceFilesUploaded={handleReferenceFilesUploaded} onDeleteReferenceFile={handleDeleteReferenceFile} onDeleteTable={handleDeleteTable} existingTables={localProject.state.tables} existingReferenceFiles={localProject.state.referenceFiles || []} />;
       case 2: return <SchemaStep tables={localProject.state.tables} onUpdateTable={handleUpdateTable} />;
       case 3: return <RelationshipMapper tables={localProject.state.tables} relationships={localProject.state.relationships} canvasScroll={localProject.state.canvasScroll} projectName={localProject.name} onAddRelationship={handleAddRelationship} onRemoveRelationship={handleRemoveRelationship} onUpdateRelationship={handleUpdateRelationship} onUpdateTables={handleUpdateTables} onUpdateCanvasScroll={handleCanvasScroll} />;
       case 4: return <RulesConfiguration tables={localProject.state.tables} relationships={localProject.state.relationships} referenceFiles={localProject.state.referenceFiles || []} onUpdateTable={handleUpdateTable} />;
@@ -1428,7 +1329,6 @@ const Editor = ({ project, onSave, onBack }: { project: Project, onSave: (p: Pro
       default: return <div>Unknown Step</div>;
     }
   };
-
   return (
     <div className="flex flex-col h-screen bg-white">
       <Navbar step={localProject.currentStep} projectName={localProject.name} onBack={onBack} onSave={() => onSave(localProject)} onStepChange={(step) => handleUpdate({ currentStep: step })} canNavigate={localProject.state.tables.length > 0} />

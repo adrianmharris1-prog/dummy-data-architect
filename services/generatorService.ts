@@ -113,17 +113,13 @@ export const generateAndDownload = async (
       tableData[col.id] = [];
     }
 
-    const fkMap = new Map<string, { parentTableId: string, parentColId: string }>();
-    relationships.filter(r => r.sourceTableId === table.id).forEach(r => {
-      fkMap.set(r.sourceColumnId, { parentTableId: r.targetTableId, parentColId: r.targetColumnId });
-    });
-
     let targetRows = 0;
     const settings = table.genSettings || { mode: 'fixed', fixedCount: 100 };
     const drivingParentId = settings.mode === 'per_parent' ? settings.drivingParentTableId : undefined;
     
     let drivingParentIds: string[] = [];
     if (settings.mode === 'per_parent' && drivingParentId) {
+       // Find the specific relationship linking this table to its driving parent
        const rel = relationships.find(r => r.sourceTableId === table.id && r.targetTableId === drivingParentId);
        if (rel && generatedDataStore[drivingParentId]?.[rel.targetColumnId]) {
          drivingParentIds = generatedDataStore[drivingParentId][rel.targetColumnId];
@@ -143,7 +139,7 @@ export const generateAndDownload = async (
     }
     const jobs: GenerationJob[] = [];
 
-    if (settings.mode === 'per_parent') {
+    if (settings.mode === 'per_parent' && drivingParentIds.length > 0) {
        drivingParentIds.forEach((pid, index) => {
           const count = getRandomInt(settings.minPerParent ?? 1, settings.maxPerParent ?? 5);
           if (count > 0) {
@@ -178,12 +174,15 @@ export const generateAndDownload = async (
 
     if (targetRows > 0) {
       const nonAiColumns = table.columns.filter(c => c.rule.type !== GenerationStrategyType.AI);
+      
       for (const job of jobs) {
         for (let k = 0; k < job.count; k++) {
           const globalRowIdx = tableData[table.columns[0].id].length;
           
-          // Registry to track which parent row index we've selected for this child row
+          // IMPORTANT: Maintains mapping consistency across multiple parent tables for a single child row
           const selectedParentIndices: Record<string, number> = {};
+          
+          // If this is a loop-driven child row, pre-set the index for the driving parent
           if (settings.mode === 'per_parent' && drivingParentId !== undefined && job.parentRowIndex !== undefined) {
              selectedParentIndices[drivingParentId] = job.parentRowIndex;
           }
@@ -192,26 +191,14 @@ export const generateAndDownload = async (
             if (selectedParentIndices[pId] !== undefined) return selectedParentIndices[pId];
             const pData = generatedDataStore[pId];
             if (!pData) return -1;
-            const firstCol = Object.keys(pData)[0];
-            const len = pData[firstCol]?.length || 0;
+            const keys = Object.keys(pData);
+            const len = keys.length > 0 ? pData[keys[0]]?.length || 0 : 0;
             const idx = len > 0 ? getRandomInt(0, len - 1) : -1;
             selectedParentIndices[pId] = idx;
             return idx;
           };
 
           for (const col of nonAiColumns) {
-            const fkInfo = fkMap.get(col.id);
-            if (fkInfo) {
-              const pIdx = getSyncedParentIndex(fkInfo.parentTableId);
-              const pVals = generatedDataStore[fkInfo.parentTableId]?.[fkInfo.parentColId];
-              if (pIdx !== -1 && pVals && pVals[pIdx] !== undefined) {
-                tableData[col.id].push(pVals[pIdx]);
-              } else {
-                tableData[col.id].push("ORPHAN");
-              }
-              continue;
-            }
-
             if (col.type === DataType.DATE) {
               tableData[col.id].push(generateDate('random'));
               continue;
@@ -245,16 +232,24 @@ export const generateAndDownload = async (
                 }
                 break;
               case GenerationStrategyType.LINKED:
-                const tTabId = col.rule.config?.linkedTableId || settings.drivingParentTableId;
+                // Prioritize user-selected source table and column from the Rules tab
+                const tTabId = col.rule.config?.linkedTableId || drivingParentId;
                 const tColId = col.rule.config?.linkedColumnId;
+                
                 if (tTabId && tColId) {
                   const pIdx = getSyncedParentIndex(tTabId);
                   const sVals = generatedDataStore[tTabId]?.[tColId];
                   if (pIdx !== -1 && sVals && sVals[pIdx] !== undefined) {
                     val = sVals[pIdx];
+                  } else {
+                    val = "MISSING_SOURCE_VAL";
                   }
+                } else {
+                  val = "UNCONFIGURED_LINK";
                 }
                 break;
+              default:
+                val = col.sampleValues[0] || "";
             }
             tableData[col.id].push(val);
           }
@@ -277,7 +272,8 @@ export const generateAndDownload = async (
     generatedDataStore[table.id] = tableData;
 
     const csvHeader = table.columns.map(c => `"${c.name}"`).join(",");
-    const finalRowCount = tableData[table.columns[0].id]?.length || 0;
+    const firstColId = table.columns[0]?.id;
+    const finalRowCount = firstColId ? tableData[firstColId]?.length || 0 : 0;
     const csvRows = [];
     for (let i = 0; i < finalRowCount; i++) {
       const row = table.columns.map(c => `"${(generatedDataStore[table.id][c.id][i] || "").replace(/"/g, '""')}"`).join(",");
