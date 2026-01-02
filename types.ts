@@ -30,8 +30,8 @@ export interface GenerationRule {
     options?: string[]; // for Dropdown/Random
     delimiter?: string; // for Multi-value (e.g. "," or "|")
     aiPrompt?: string; // for Gemini
-    dependentColumnId?: string; // Column to use as context for AI
-    referenceFileId?: string; // NEW: The ID of the uploaded reference file to use
+    dependentColumnIds?: string[]; // CHANGED: Multiple columns to use as context for AI
+    referenceFileId?: string; // The ID of the uploaded reference file to use
     linkedTableId?: string; // Explicit table link
     linkedColumnId?: string; // Explicit column link
   };
@@ -45,6 +45,22 @@ export interface TableGenerationSettings {
   drivingParentTableId?: string; // The parent table that dictates the loop
 }
 
+export interface Actor {
+  id: string;
+  name: string;
+  description?: string;
+}
+
+export interface TablePermission {
+  actorId: string;
+  canCreate: boolean;
+  canModify: boolean; // New permission
+  canDelete: boolean; // New permission
+  canView: boolean;
+}
+
+export type TableType = 'Object' | 'Relationship';
+
 export interface Column {
   id: string;
   name: string;
@@ -52,7 +68,8 @@ export interface Column {
   isMultiValue: boolean;
   sampleValues: string[]; // First few rows from upload
   rule: GenerationRule;
-  revisionSchema?: string; // NEW: Sequence of revision labels like "0, 1, 2" or "-, A, B"
+  revisionSchema?: string; // Sequence of revision labels like "0, 1, 2" or "-, A, B"
+  description?: string; // New: Column description
 }
 
 export interface Table {
@@ -61,6 +78,9 @@ export interface Table {
   columns: Column[];
   rowCount: number; // Legacy default
   genSettings?: TableGenerationSettings; // New configuration
+  tableType?: TableType; // New: Object or Relationship
+  description?: string; // New: Description
+  permissions?: TablePermission[]; // New: Actor permissions
   ui?: {
     x: number;
     y: number;
@@ -85,7 +105,8 @@ export interface Relationship {
 export interface ProjectState {
   tables: Table[];
   relationships: Relationship[];
-  referenceFiles: ReferenceFile[]; // NEW: Storage for reference datasets
+  referenceFiles: ReferenceFile[]; // Storage for reference datasets
+  actors: Actor[]; // New: List of available actors
   canvasScroll?: { x: number; y: number }; // Added for main canvas scroll persistence
 }
 

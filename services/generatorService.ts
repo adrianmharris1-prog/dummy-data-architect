@@ -152,20 +152,19 @@ export const generateAndDownload = async (
        jobs.push({ count: targetRows });
     }
 
-    const aiCache: Record<string, string[]> = {};
     const aiColumns = table.columns.filter(c => c.rule.type === GenerationStrategyType.AI);
     const sortedAiColumns: Column[] = [];
     const visited = new Set<string>();
 
     const visit = (col: Column) => {
       if (visited.has(col.id)) return;
-      const depId = col.rule.config?.dependentColumnId;
-      if (depId) {
+      const depIds = col.rule.config?.dependentColumnIds || [];
+      depIds.forEach(depId => {
         const depCol = table.columns.find(c => c.id === depId);
         if (depCol && depCol.rule.type === GenerationStrategyType.AI) {
            visit(depCol);
         }
-      }
+      });
       visited.add(col.id);
       sortedAiColumns.push(col);
     };
@@ -179,10 +178,8 @@ export const generateAndDownload = async (
         for (let k = 0; k < job.count; k++) {
           const globalRowIdx = tableData[table.columns[0].id].length;
           
-          // IMPORTANT: Maintains mapping consistency across multiple parent tables for a single child row
           const selectedParentIndices: Record<string, number> = {};
           
-          // If this is a loop-driven child row, pre-set the index for the driving parent
           if (settings.mode === 'per_parent' && drivingParentId !== undefined && job.parentRowIndex !== undefined) {
              selectedParentIndices[drivingParentId] = job.parentRowIndex;
           }
@@ -232,7 +229,6 @@ export const generateAndDownload = async (
                 }
                 break;
               case GenerationStrategyType.LINKED:
-                // Prioritize user-selected source table and column from the Rules tab
                 const tTabId = col.rule.config?.linkedTableId || drivingParentId;
                 const tColId = col.rule.config?.linkedColumnId;
                 
@@ -258,14 +254,23 @@ export const generateAndDownload = async (
 
       for (const col of sortedAiColumns) {
         onProgress(`Generating AI content for ${table.name}.${col.name}...`);
-        const depId = col.rule.config?.dependentColumnId;
-        let contextValues: string[] = [];
-        if (depId) {
-          contextValues = tableData[depId] || aiCache[depId] || [];
+        const depIds = col.rule.config?.dependentColumnIds || [];
+        
+        // Build an array of multi-column context strings for each row
+        const contextStrings: string[] = [];
+        const numRows = tableData[table.columns[0].id].length;
+        
+        for (let rowIdx = 0; rowIdx < numRows; rowIdx++) {
+          const rowContext = depIds.map(depId => {
+            const depCol = table.columns.find(c => c.id === depId);
+            const val = tableData[depId]?.[rowIdx] || "";
+            return `${depCol?.name}: ${val}`;
+          }).join(", ");
+          contextStrings.push(rowContext ? `[${rowContext}]` : "");
         }
+        
         const prompt = col.rule.config?.aiPrompt || "Generate random values";
-        aiCache[col.id] = await generateSyntheticDataBatch(prompt, targetRows, col.sampleValues, contextValues);
-        tableData[col.id] = aiCache[col.id];
+        tableData[col.id] = await generateSyntheticDataBatch(prompt, targetRows, col.sampleValues, contextStrings);
       }
     }
 

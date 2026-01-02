@@ -2,32 +2,154 @@
 import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
+import * as FileSaver from 'file-saver';
 import { 
   Upload, Table as TableIcon, Network, Settings, Download, 
   Plus, X, ChevronRight, ChevronLeft, FileSpreadsheet, Wand2, Database,
   ArrowRight, ArrowLeft, Save, GripHorizontal, Move, Maximize2, Minimize2, Trash2, Link,
   Users, Layers, Hash, Eye, EyeOff, PanelLeftClose, PanelLeftOpen,
-  Sparkles, MessageSquare, AlertCircle, FileText, Trash
+  Sparkles, MessageSquare, AlertCircle, FileText, Trash, CheckSquare, Square,
+  Shield, UserPlus, Info, BookOpen, FileCode
 } from 'lucide-react';
-import { Table, Column, Relationship, DataType, GenerationStrategyType, GenerationRule, Project, Cardinality, TableGenerationSettings, ReferenceFile } from './types';
+import { Table, Column, Relationship, DataType, GenerationStrategyType, GenerationRule, Project, Cardinality, TableGenerationSettings, ReferenceFile, Actor, TablePermission, TableType } from './types';
 import { generateAndDownload } from './services/generatorService';
 
 // --- Sub-components ---
+
+// 0. Actors Management Modal
+const ActorsModal = ({ 
+  isOpen, 
+  onClose, 
+  actors, 
+  onUpdateActors 
+}: { 
+  isOpen: boolean, 
+  onClose: () => void, 
+  actors: Actor[], 
+  onUpdateActors: (actors: Actor[]) => void 
+}) => {
+  const [newActorName, setNewActorName] = useState('');
+  const [newActorDescription, setNewActorDescription] = useState('');
+
+  if (!isOpen) return null;
+
+  const handleAddActor = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newActorName.trim()) return;
+    const newActor: Actor = { 
+      id: crypto.randomUUID(), 
+      name: newActorName.trim(),
+      description: newActorDescription.trim()
+    };
+    onUpdateActors([...actors, newActor]);
+    setNewActorName('');
+    setNewActorDescription('');
+  };
+
+  const handleDeleteActor = (id: string) => {
+    onUpdateActors(actors.filter(a => a.id !== id));
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4 backdrop-blur-sm">
+      <div className="bg-white rounded-xl w-full max-w-lg shadow-2xl animate-in fade-in zoom-in-95 duration-200 overflow-hidden">
+        <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+          <h3 className="font-bold text-slate-800 flex items-center gap-2">
+            <Users size={18} className="text-blue-600" /> Manage Actors
+          </h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X size={20} /></button>
+        </div>
+        
+        <div className="p-6">
+          <div className="mb-6">
+            <p className="text-sm text-slate-600 mb-4">Define individuals or functional groups (e.g., "Finance Team", "System Admin") responsible for data management. You can then assign permissions to these actors for specific tables.</p>
+            
+            <form onSubmit={handleAddActor} className="flex flex-col gap-3 mb-6 bg-slate-50 p-4 rounded-lg border border-slate-200">
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Name</label>
+                <input 
+                  type="text" 
+                  value={newActorName}
+                  onChange={(e) => setNewActorName(e.target.value)}
+                  placeholder="e.g. Compliance Officer"
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none bg-white"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Description (Optional)</label>
+                <textarea 
+                  value={newActorDescription}
+                  onChange={(e) => setNewActorDescription(e.target.value)}
+                  placeholder="e.g. Responsible for auditing financial records..."
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none bg-white resize-y min-h-[80px]"
+                  rows={3}
+                />
+              </div>
+              <div className="flex justify-end mt-1">
+                <button 
+                  type="submit" 
+                  disabled={!newActorName.trim()}
+                  className="px-4 py-2 bg-slate-800 text-white rounded-lg text-sm font-medium hover:bg-slate-900 disabled:opacity-50 flex items-center gap-2"
+                >
+                  <Plus size={16} /> Add Actor
+                </button>
+              </div>
+            </form>
+
+            <div className="bg-white rounded-lg border border-slate-200 max-h-64 overflow-y-auto">
+              {actors.length === 0 ? (
+                <div className="p-8 text-center flex flex-col items-center justify-center text-slate-400">
+                  <Users size={32} className="mb-2 opacity-20" />
+                  <p className="text-xs italic">No actors defined yet.</p>
+                </div>
+              ) : (
+                <ul className="divide-y divide-slate-100">
+                  {actors.map(actor => (
+                    <li key={actor.id} className="flex justify-between items-start px-4 py-3 hover:bg-slate-50 transition-colors">
+                      <div className="flex-1 mr-4">
+                        <div className="font-medium text-slate-700 text-sm">{actor.name}</div>
+                        {actor.description && (
+                          <div className="text-xs text-slate-500 mt-1 whitespace-pre-wrap leading-relaxed">{actor.description}</div>
+                        )}
+                      </div>
+                      <button onClick={() => handleDeleteActor(actor.id)} className="text-slate-300 hover:text-red-500 p-1 rounded hover:bg-red-50 transition-colors" title="Remove Actor">
+                        <Trash2 size={14} />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        </div>
+        
+        <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex justify-end">
+          <button onClick={onClose} className="px-4 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">
+            Done
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 // 1. Navbar
 const Navbar = ({ 
   step, 
   projectName, 
   onBack, 
-  onSave,
+  onSave, 
   onStepChange,
+  onOpenActors,
   canNavigate
 }: { 
   step: number, 
   projectName: string, 
   onBack: () => void, 
-  onSave: () => void,
+  onSave: () => void, 
   onStepChange: (step: number) => void,
+  onOpenActors: () => void,
   canNavigate: boolean
 }) => {
   const [saveState, setSaveState] = useState<'idle' | 'saved'>('idle');
@@ -94,6 +216,16 @@ const Navbar = ({
             </button>
           );
         })}
+      </div>
+      <div className="pl-4 border-l border-slate-200 ml-4">
+        <button 
+          onClick={onOpenActors}
+          className="flex items-center gap-2 px-3 py-2 text-slate-600 hover:text-primary hover:bg-blue-50 rounded-lg transition-colors text-sm font-medium"
+          title="Manage Project Actors"
+        >
+          <Users size={18} />
+          <span>Actors</span>
+        </button>
       </div>
     </div>
   );
@@ -240,7 +372,8 @@ const FileUploadStep = ({
               isMultiValue: detected.isMultiValue,
               sampleValues: samples,
               rule: detected.rule,
-              revisionSchema: detected.revisionSchema
+              revisionSchema: detected.revisionSchema,
+              description: ''
             };
           });
 
@@ -271,7 +404,8 @@ const FileUploadStep = ({
                 isMultiValue: detected.isMultiValue,
                 sampleValues: samples,
                 rule: detected.rule,
-                revisionSchema: detected.revisionSchema
+                revisionSchema: detected.revisionSchema,
+                description: ''
               };
             });
             resolve({
@@ -517,9 +651,49 @@ const FileUploadStep = ({
 };
 
 // 3. Schema Step
-const SchemaStep = ({ tables, onUpdateTable }: { tables: Table[], onUpdateTable: (t: Table) => void }) => {
+const SchemaStep = ({ tables, onUpdateTable, actors, onOpenActors }: { tables: Table[], onUpdateTable: (t: Table) => void, actors: Actor[], onOpenActors: () => void }) => {
   const [selectedTableId, setSelectedTableId] = useState<string>(tables[0]?.id);
   const activeTable = tables.find(t => t.id === selectedTableId);
+
+  const handleUpdatePermission = (actorId: string, field: 'canCreate' | 'canModify' | 'canDelete' | 'canView', value: boolean) => {
+    if (!activeTable) return;
+    const currentPermissions = activeTable.permissions || [];
+    const existingIndex = currentPermissions.findIndex(p => p.actorId === actorId);
+    
+    let newPermissions = [...currentPermissions];
+    if (existingIndex >= 0) {
+      newPermissions[existingIndex] = { ...newPermissions[existingIndex], [field]: value };
+    } else {
+      newPermissions.push({ 
+        actorId, 
+        canCreate: false, 
+        canModify: false,
+        canDelete: false, 
+        canView: false, 
+        [field]: value 
+      });
+    }
+    onUpdateTable({ ...activeTable, permissions: newPermissions });
+  };
+
+  const handleAddActorToTable = (actorId: string) => {
+    if (!activeTable) return;
+    if (activeTable.permissions?.some(p => p.actorId === actorId)) return;
+    const newPermissions = [...(activeTable.permissions || []), { 
+      actorId, 
+      canCreate: false, 
+      canModify: false, 
+      canDelete: false, 
+      canView: true 
+    }];
+    onUpdateTable({ ...activeTable, permissions: newPermissions });
+  };
+
+  const handleRemoveActorFromTable = (actorId: string) => {
+    if (!activeTable) return;
+    const newPermissions = (activeTable.permissions || []).filter(p => p.actorId !== actorId);
+    onUpdateTable({ ...activeTable, permissions: newPermissions });
+  };
 
   return (
     <div className="flex-1 flex overflow-hidden">
@@ -539,79 +713,233 @@ const SchemaStep = ({ tables, onUpdateTable }: { tables: Table[], onUpdateTable:
 
       <div className="flex-1 overflow-y-auto bg-slate-50 p-8">
         {activeTable && (
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-            <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center">
-              <h2 className="text-lg font-semibold text-slate-800">{activeTable.name} Schema</h2>
-              <span className="text-sm text-slate-400">{activeTable.columns.length} columns detected</span>
-            </div>
-            <table className="w-full text-left text-sm">
-              <thead className="bg-slate-50 text-slate-500 font-medium border-b border-slate-100">
-                <tr>
-                  <th className="px-6 py-3">Column Name</th>
-                  <th className="px-6 py-3">Data Type</th>
-                  <th className="px-6 py-3">Configuration</th>
-                  <th className="px-6 py-3 text-center">Multi-value</th>
-                  <th className="px-6 py-3">Sample Data</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {activeTable.columns.map((col, idx) => (
-                  <tr key={col.id} className="hover:bg-slate-50/50">
-                    <td className="px-6 py-3 font-medium text-slate-700">{col.name}</td>
-                    <td className="px-6 py-3">
-                      <select 
-                        value={col.type}
-                        onChange={(e) => {
-                          const newCols = [...activeTable.columns];
-                          newCols[idx] = { ...col, type: e.target.value as DataType };
-                          onUpdateTable({ ...activeTable, columns: newCols });
-                        }}
-                        className="bg-white border border-slate-300 text-slate-700 text-sm rounded-md focus:ring-primary focus:border-primary block w-32 p-1.5"
-                      >
-                        {Object.values(DataType).map(type => (
-                          <option key={type} value={type}>{type}</option>
-                        ))}
-                      </select>
-                    </td>
-                    <td className="px-6 py-3">
-                      {col.type === DataType.REVISION ? (
-                        <div className="space-y-1">
-                          <label className="text-[10px] text-slate-400 uppercase font-bold">Revision Schema</label>
-                          <input 
-                            type="text" 
-                            value={col.revisionSchema || '-, A, B, C'} 
-                            placeholder="e.g. -, A, B or 0, 1, 2"
-                            onChange={(e) => {
-                              const newCols = [...activeTable.columns];
-                              newCols[idx] = { ...col, revisionSchema: e.target.value };
-                              onUpdateTable({ ...activeTable, columns: newCols });
-                            }}
-                            className="bg-white border border-slate-300 text-slate-700 text-xs rounded-md focus:ring-primary focus:border-primary block w-full p-1.5"
-                          />
-                        </div>
-                      ) : (
-                        <span className="text-slate-300 italic">-</span>
+          <div className="space-y-6">
+            
+            {/* Table Metadata Card */}
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+              <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
+                <Info size={18} className="text-blue-600" /> Table Metadata & Security
+              </h3>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">Data Classification</label>
+                  <div className="flex p-1 bg-slate-100 rounded-lg w-fit border border-slate-200">
+                    <button 
+                      onClick={() => onUpdateTable({ ...activeTable, tableType: 'Object' })}
+                      className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${(!activeTable.tableType || activeTable.tableType === 'Object') ? 'bg-white shadow-sm text-blue-700' : 'text-slate-500 hover:text-slate-700'}`}
+                    >
+                      Object Data
+                    </button>
+                    <button 
+                      onClick={() => onUpdateTable({ ...activeTable, tableType: 'Relationship' })}
+                      className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${activeTable.tableType === 'Relationship' ? 'bg-white shadow-sm text-blue-700' : 'text-slate-500 hover:text-slate-700'}`}
+                    >
+                      Relationship Data
+                    </button>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-2">
+                    {(!activeTable.tableType || activeTable.tableType === 'Object') 
+                      ? "Represents a distinct entity (e.g. User, Product, Order)." 
+                      : "Represents a link between entities (e.g. UserGroup, OrderItem)."
+                    }
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">Description</label>
+                  <textarea 
+                    value={activeTable.description || ''}
+                    onChange={(e) => onUpdateTable({ ...activeTable, description: e.target.value })}
+                    placeholder="Describe the purpose and contents of this table..."
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none h-[88px] resize-none"
+                  />
+                </div>
+              </div>
+
+              {/* Actors Matrix */}
+              <div>
+                <div className="flex justify-between items-center mb-3">
+                  <label className="block text-sm font-medium text-slate-700 flex items-center gap-2">
+                    <Shield size={16} className="text-purple-600" /> Access Control List (ACL)
+                  </label>
+                  
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={onOpenActors}
+                      className="text-xs text-blue-600 hover:underline flex items-center gap-1 font-medium"
+                    >
+                      <Settings size={12} /> Manage Actors
+                    </button>
+                    <div className="w-px h-4 bg-slate-300"></div>
+                    <select 
+                      onChange={(e) => {
+                        if (e.target.value) {
+                          handleAddActorToTable(e.target.value);
+                          e.target.value = "";
+                        }
+                      }}
+                      className="bg-white border border-slate-300 text-slate-700 text-xs rounded-lg focus:ring-primary focus:border-primary block py-1.5 px-3 appearance-none cursor-pointer hover:bg-slate-50"
+                    >
+                      <option value="">+ Assign Actor</option>
+                      {actors
+                        .filter(a => !activeTable.permissions?.some(p => p.actorId === a.id))
+                        .map(a => <option key={a.id} value={a.id}>{a.name}</option>)
+                      }
+                    </select>
+                  </div>
+                </div>
+
+                <div className="border border-slate-200 rounded-lg overflow-hidden">
+                  <table className="w-full text-left text-sm">
+                    <thead className="bg-slate-50 text-slate-500 font-medium text-xs uppercase tracking-wider">
+                      <tr>
+                        <th className="px-4 py-2 w-1/3">Assigned Actor</th>
+                        <th className="px-4 py-2 text-center w-1/6">Create</th>
+                        <th className="px-4 py-2 text-center w-1/6">Modify</th>
+                        <th className="px-4 py-2 text-center w-1/6">Delete</th>
+                        <th className="px-4 py-2 text-center w-1/6">View</th>
+                        <th className="px-4 py-2 text-right w-1/12"></th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 bg-white">
+                      {(!activeTable.permissions || activeTable.permissions.length === 0) && (
+                        <tr>
+                          <td colSpan={6} className="px-4 py-6 text-center text-slate-400 text-sm">
+                            <div className="flex flex-col items-center gap-2">
+                              <Shield size={24} className="opacity-20" />
+                              <span>No access rules defined. All users have implicit access.</span>
+                            </div>
+                          </td>
+                        </tr>
                       )}
-                    </td>
-                    <td className="px-6 py-3 text-center">
-                      <input 
-                        type="checkbox" 
-                        checked={col.isMultiValue}
-                        onChange={(e) => {
-                          const newCols = [...activeTable.columns];
-                          newCols[idx] = { ...col, isMultiValue: e.target.checked };
-                          onUpdateTable({ ...activeTable, columns: newCols });
-                        }}
-                        className="w-4 h-4 text-primary bg-gray-100 border-gray-300 rounded focus:ring-primary"
-                      />
-                    </td>
-                    <td className="px-6 py-3 text-slate-400 italic truncate max-w-xs">
-                      {col.sampleValues.slice(0, 3).join(', ')}...
-                    </td>
+                      {activeTable.permissions?.map(perm => {
+                        const actor = actors.find(a => a.id === perm.actorId);
+                        if (!actor) return null;
+                        return (
+                          <tr key={perm.actorId} className="hover:bg-slate-50">
+                            <td className="px-4 py-2 font-medium text-slate-700 flex items-center gap-2">
+                              <div className="w-6 h-6 bg-slate-200 rounded-full flex items-center justify-center text-[10px] text-slate-600 font-bold">
+                                {actor.name.substring(0,2).toUpperCase()}
+                              </div>
+                              <div className="flex flex-col">
+                                <span>{actor.name}</span>
+                                {actor.description && <span className="text-[10px] text-slate-400 font-normal">{actor.description}</span>}
+                              </div>
+                            </td>
+                            <td className="px-4 py-2 text-center">
+                              <input 
+                                type="checkbox" 
+                                checked={perm.canCreate}
+                                onChange={(e) => handleUpdatePermission(perm.actorId, 'canCreate', e.target.checked)}
+                                className="w-4 h-4 text-primary rounded border-slate-300 focus:ring-primary cursor-pointer"
+                              />
+                            </td>
+                            <td className="px-4 py-2 text-center">
+                              <input 
+                                type="checkbox" 
+                                checked={perm.canModify}
+                                onChange={(e) => handleUpdatePermission(perm.actorId, 'canModify', e.target.checked)}
+                                className="w-4 h-4 text-primary rounded border-slate-300 focus:ring-primary cursor-pointer"
+                              />
+                            </td>
+                            <td className="px-4 py-2 text-center">
+                              <input 
+                                type="checkbox" 
+                                checked={perm.canDelete}
+                                onChange={(e) => handleUpdatePermission(perm.actorId, 'canDelete', e.target.checked)}
+                                className="w-4 h-4 text-primary rounded border-slate-300 focus:ring-primary cursor-pointer"
+                              />
+                            </td>
+                            <td className="px-4 py-2 text-center">
+                              <input 
+                                type="checkbox" 
+                                checked={perm.canView}
+                                onChange={(e) => handleUpdatePermission(perm.actorId, 'canView', e.target.checked)}
+                                className="w-4 h-4 text-primary rounded border-slate-300 focus:ring-primary cursor-pointer"
+                              />
+                            </td>
+                            <td className="px-4 py-2 text-right">
+                              <button onClick={() => handleRemoveActorFromTable(perm.actorId)} className="text-slate-300 hover:text-red-500 transition-colors">
+                                <X size={16} />
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            {/* Existing Column Schema Table */}
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+              <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center">
+                <h2 className="text-lg font-semibold text-slate-800">Column Schema</h2>
+                <span className="text-sm text-slate-400">{activeTable.columns.length} columns detected</span>
+              </div>
+              <table className="w-full text-left text-sm">
+                <thead className="bg-slate-50 text-slate-500 font-medium border-b border-slate-100">
+                  <tr>
+                    <th className="px-6 py-3 w-1/6">Column Name</th>
+                    <th className="px-6 py-3 w-1/3">Description</th>
+                    <th className="px-6 py-3">Data Type</th>
+                    <th className="px-6 py-3 text-center">Multi-value</th>
+                    <th className="px-6 py-3">Sample Data</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {activeTable.columns.map((col, idx) => (
+                    <tr key={col.id} className="hover:bg-slate-50/50">
+                      <td className="px-6 py-3 font-medium text-slate-700 align-top pt-4">{col.name}</td>
+                      <td className="px-6 py-3 align-top">
+                        <textarea 
+                          value={col.description || ''}
+                          onChange={(e) => {
+                            const newCols = [...activeTable.columns];
+                            newCols[idx] = { ...col, description: e.target.value };
+                            onUpdateTable({ ...activeTable, columns: newCols });
+                          }}
+                          placeholder="Add description..."
+                          className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:ring-1 focus:ring-primary outline-none resize-y min-h-[60px]"
+                          rows={2}
+                        />
+                      </td>
+                      <td className="px-6 py-3 align-top pt-4">
+                        <select 
+                          value={col.type}
+                          onChange={(e) => {
+                            const newCols = [...activeTable.columns];
+                            newCols[idx] = { ...col, type: e.target.value as DataType };
+                            onUpdateTable({ ...activeTable, columns: newCols });
+                          }}
+                          className="bg-white border border-slate-300 text-slate-700 text-sm rounded-md focus:ring-primary focus:border-primary block w-32 p-1.5"
+                        >
+                          {Object.values(DataType).map(type => (
+                            <option key={type} value={type}>{type}</option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="px-6 py-3 text-center align-top pt-5">
+                        <input 
+                          type="checkbox" 
+                          checked={col.isMultiValue}
+                          onChange={(e) => {
+                            const newCols = [...activeTable.columns];
+                            newCols[idx] = { ...col, isMultiValue: e.target.checked };
+                            onUpdateTable({ ...activeTable, columns: newCols });
+                          }}
+                          className="w-4 h-4 text-primary bg-gray-100 border-gray-300 rounded focus:ring-primary"
+                        />
+                      </td>
+                      <td className="px-6 py-3 text-slate-400 italic truncate max-w-xs align-top pt-4">
+                        {col.sampleValues.slice(0, 3).join(', ')}...
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
       </div>
@@ -1032,11 +1360,13 @@ const RelationshipMapper = ({
 const RulesConfiguration = ({ tables, relationships, referenceFiles, onUpdateTable }: { tables: Table[], relationships: Relationship[], referenceFiles: ReferenceFile[], onUpdateTable: (t: Table) => void }) => {
   const [selectedTableId, setSelectedTableId] = useState<string>(tables[0]?.id || '');
   const activeTable = tables.find(t => t.id === selectedTableId);
+  
   const handleRuleChange = (colId: string, rule: GenerationRule) => {
     if (!activeTable) return;
     const newCols = activeTable.columns.map(c => c.id === colId ? { ...c, rule } : c);
     onUpdateTable({ ...activeTable, columns: newCols });
   };
+  
   const handleSettingsChange = (settings: TableGenerationSettings) => {
     if (!activeTable) return;
     onUpdateTable({ ...activeTable, genSettings: settings });
@@ -1052,6 +1382,22 @@ const RulesConfiguration = ({ tables, relationships, referenceFiles, onUpdateTab
   };
   
   const connectedTables = activeTable ? getConnectedTables(activeTable.id) : [];
+
+  const toggleContextColumn = (colId: string, targetColId: string) => {
+    if (!activeTable) return;
+    const col = activeTable.columns.find(c => c.id === colId);
+    if (!col) return;
+    
+    const currentIds = col.rule.config?.dependentColumnIds || [];
+    const newIds = currentIds.includes(targetColId)
+      ? currentIds.filter(id => id !== targetColId)
+      : [...currentIds, targetColId];
+      
+    handleRuleChange(colId, { 
+      ...col.rule, 
+      config: { ...col.rule.config, dependentColumnIds: newIds } 
+    });
+  };
 
   return (
     <div className="flex-1 flex overflow-hidden">
@@ -1136,19 +1482,35 @@ const RulesConfiguration = ({ tables, relationships, referenceFiles, onUpdateTab
                             <select value={col.rule.type} onChange={(e) => handleRuleChange(col.id, { ...col.rule, type: e.target.value as GenerationStrategyType })} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none">
                                {Object.values(GenerationStrategyType).map(t => ( <option key={t} value={t}>{t}</option> ))}
                             </select>
+                            {col.type === DataType.REVISION && (
+                              <div className="mt-4 p-3 bg-blue-50/50 rounded-lg border border-blue-100">
+                                <label className="block text-[10px] font-bold text-blue-600 uppercase mb-1">Revision Schema</label>
+                                <input 
+                                  type="text" 
+                                  value={col.revisionSchema || '-, A, B, C, D'} 
+                                  placeholder="e.g. -, A, B or 0, 1, 2"
+                                  onChange={(e) => {
+                                    const newCols = activeTable.columns.map(c => c.id === col.id ? { ...c, revisionSchema: e.target.value } : c);
+                                    onUpdateTable({ ...activeTable, columns: newCols });
+                                  }}
+                                  className="w-full bg-white border border-blue-200 text-slate-700 text-xs rounded px-2 py-1.5 focus:ring-1 focus:ring-primary outline-none"
+                                />
+                                <p className="text-[9px] text-blue-400 mt-1">Defines the sequence for generated revisions.</p>
+                              </div>
+                            )}
                          </div>
                          <div className="flex-1">
                             {col.rule.type === GenerationStrategyType.PATTERN && (
                                <div>
                                   <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Pattern (use # for number)</label>
                                   <input type="text" value={col.rule.config?.pattern || ''} placeholder="e.g. ORD-####" onChange={(e) => handleRuleChange(col.id, { ...col.rule, config: { ...col.rule.config, pattern: e.target.value } })} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none" />
-                               </div>
+                                </div>
                             )}
                             {col.rule.type === GenerationStrategyType.RANDOM && (
                                <div>
                                   <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Options (comma separated)</label>
                                   <input type="text" value={col.rule.config?.options?.join(', ') || ''} onChange={(e) => handleRuleChange(col.id, { ...col.rule, config: { ...col.rule.config, options: e.target.value.split(',').map(s => s.trim()) } })} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none" />
-                               </div>
+                                </div>
                             )}
                             {col.rule.type === GenerationStrategyType.REFERENCE && (
                                <div>
@@ -1157,7 +1519,7 @@ const RulesConfiguration = ({ tables, relationships, referenceFiles, onUpdateTab
                                     <option value="">Select File...</option>
                                     {referenceFiles.map(rf => ( <option key={rf.id} value={rf.id}>{rf.name} ({rf.values.length} rows)</option> ))}
                                   </select>
-                               </div>
+                                </div>
                             )}
                             {col.rule.type === GenerationStrategyType.AI && (
                                <div className="space-y-4">
@@ -1166,11 +1528,23 @@ const RulesConfiguration = ({ tables, relationships, referenceFiles, onUpdateTab
                                      <textarea value={col.rule.config?.aiPrompt || ''} placeholder="Describe what kind of data to generate..." onChange={(e) => handleRuleChange(col.id, { ...col.rule, config: { ...col.rule.config, aiPrompt: e.target.value } })} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm h-[38px] min-h-[38px] resize-y focus:ring-2 focus:ring-primary outline-none" />
                                   </div>
                                   <div>
-                                     <label className="block text-xs font-semibold text-slate-500 uppercase mb-1 flex items-center gap-1"><Link size={12} className="text-blue-500"/> Context Column (Optional)</label>
-                                     <select value={col.rule.config?.dependentColumnId || ''} onChange={(e) => handleRuleChange(col.id, { ...col.rule, config: { ...col.rule.config, dependentColumnId: e.target.value } })} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none">
-                                        <option value="">None (Independent)</option>
-                                        {activeTable.columns.filter(c => c.id !== col.id).map(c => ( <option key={c.id} value={c.id}>{c.name}</option> ))}
-                                     </select>
+                                     <label className="block text-xs font-semibold text-slate-500 uppercase mb-1 flex items-center gap-1"><Link size={12} className="text-blue-500"/> Context Columns (Required for dependencies)</label>
+                                     <div className="max-h-32 overflow-y-auto border border-slate-200 rounded-lg p-2 bg-white space-y-1">
+                                        {activeTable.columns.filter(c => c.id !== col.id).map(c => {
+                                          const isSelected = (col.rule.config?.dependentColumnIds || []).includes(c.id);
+                                          return (
+                                            <button 
+                                              key={c.id} 
+                                              onClick={() => toggleContextColumn(col.id, c.id)}
+                                              className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs transition-colors ${isSelected ? 'bg-primary/10 text-primary' : 'hover:bg-slate-50 text-slate-600'}`}
+                                            >
+                                              {isSelected ? <CheckSquare size={14} /> : <Square size={14} />}
+                                              <span className="truncate">{c.name}</span>
+                                            </button>
+                                          );
+                                        })}
+                                     </div>
+                                     <p className="text-[10px] text-slate-400 mt-1 italic">The AI will use these columns' generated values as input for this field.</p>
                                   </div>
                                </div>
                             )}
@@ -1218,7 +1592,7 @@ const RulesConfiguration = ({ tables, relationships, referenceFiles, onUpdateTab
 };
 
 // 6. Export Panel
-const ExportPanel = ({ tables, relationships, referenceFiles }: { tables: Table[], relationships: Relationship[], referenceFiles: ReferenceFile[] }) => {
+const ExportPanel = ({ tables, relationships, referenceFiles, actors }: { tables: Table[], relationships: Relationship[], referenceFiles: ReferenceFile[], actors: Actor[] }) => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [progress, setProgress] = useState("");
   const handleGenerate = async () => {
@@ -1228,13 +1602,83 @@ const ExportPanel = ({ tables, relationships, referenceFiles }: { tables: Table[
     catch (e) { console.error(e); setProgress("Error occurred during generation."); } 
     finally { setTimeout(() => { setIsGenerating(false); setProgress(""); }, 2000); }
   };
+
+  const handleGenerateManifest = () => {
+    const manifest = {
+      projectTimestamp: new Date().toISOString(),
+      actorsDirectory: actors.map(a => ({
+        id: a.id,
+        name: a.name,
+        description: a.description || "No description provided."
+      })),
+      tableDefinitions: tables.map(t => ({
+        id: t.id,
+        name: t.name,
+        businessDescription: t.description || "No business description provided.",
+        columns: t.columns.map(c => ({
+          name: c.name,
+          type: c.type,
+          description: c.description || "",
+          example: c.sampleValues?.[0] || ""
+        })),
+        permissionsMatrix: (t.permissions || []).map(p => {
+          const actor = actors.find(a => a.id === p.actorId);
+          return {
+            actorId: p.actorId,
+            actorName: actor?.name || "Unknown Actor",
+            canCreate: p.canCreate,
+            canModify: p.canModify,
+            canDelete: p.canDelete,
+            canView: p.canView
+          };
+        })
+      })),
+      relationshipMapping: relationships.map(r => {
+        const srcTable = tables.find(t => t.id === r.sourceTableId);
+        const tgtTable = tables.find(t => t.id === r.targetTableId);
+        const srcCol = srcTable?.columns.find(c => c.id === r.sourceColumnId);
+        const tgtCol = tgtTable?.columns.find(c => c.id === r.targetColumnId);
+        return {
+          relationshipId: r.id,
+          source: {
+            table: srcTable?.name || r.sourceTableId,
+            column: srcCol?.name || r.sourceColumnId
+          },
+          target: {
+            table: tgtTable?.name || r.targetTableId,
+            column: tgtCol?.name || r.targetColumnId
+          },
+          cardinality: r.cardinality
+        };
+      }),
+      dataSamples: tables.reduce((acc, t) => {
+        acc[t.name] = t.columns.reduce((colAcc, c) => {
+          colAcc[c.name] = c.sampleValues.slice(0, 2);
+          return colAcc;
+        }, {} as Record<string, string[]>);
+        return acc;
+      }, {} as Record<string, Record<string, string[]>>)
+    };
+
+    const blob = new Blob([JSON.stringify(manifest, null, 2)], { type: "application/json" });
+    const saveAsFunc = (FileSaver as any).saveAs || (FileSaver as any).default || FileSaver;
+    saveAsFunc(blob, "schema_manifest.json");
+  };
+
   return (
     <div className="flex-1 flex flex-col items-center justify-center bg-slate-50 p-12">
       <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-8 max-w-md w-full text-center">
          <div className="w-20 h-20 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-6"><Download size={40} /></div>
          <h2 className="text-2xl font-bold text-slate-800 mb-2">Ready to Generate</h2>
          <p className="text-slate-500 mb-8">We have {tables.length} tables and {relationships.length} relationships configured. Click below to generate your synthetic dataset.</p>
-         {isGenerating ? <div className="space-y-4"><div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden"><div className="h-full bg-primary animate-progress origin-left w-full"></div></div><p className="text-sm font-medium text-slate-600 animate-pulse">{progress}</p></div> : <button onClick={handleGenerate} className="w-full py-4 bg-primary hover:bg-blue-700 text-white rounded-xl font-bold text-lg shadow-lg shadow-blue-500/30 transition-all transform hover:-translate-y-1">Generate & Download ZIP</button>}
+         {isGenerating ? <div className="space-y-4"><div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden"><div className="h-full bg-primary animate-progress origin-left w-full"></div></div><p className="text-sm font-medium text-slate-600 animate-pulse">{progress}</p></div> : 
+         <div className="flex flex-col gap-3">
+            <button onClick={handleGenerate} className="w-full py-4 bg-primary hover:bg-blue-700 text-white rounded-xl font-bold text-lg shadow-lg shadow-blue-500/30 transition-all transform hover:-translate-y-1">Generate & Download ZIP</button>
+            <button onClick={handleGenerateManifest} className="w-full py-4 bg-slate-800 text-white hover:bg-slate-900 rounded-xl font-bold text-lg shadow-lg shadow-slate-500/20 transition-all flex items-center justify-center gap-2 transform hover:-translate-y-1">
+              <FileCode size={20} /> Generate Schema Manifest (JSON)
+            </button>
+         </div>
+         }
       </div>
     </div>
   );
@@ -1243,20 +1687,56 @@ const ExportPanel = ({ tables, relationships, referenceFiles }: { tables: Table[
 // Main Editor Component
 const Editor = ({ project, onSave, onBack }: { project: Project, onSave: (p: Project) => void, onBack: () => void }) => {
   const [localProject, setLocalProject] = useState<Project>(project);
+  const [isActorsOpen, setIsActorsOpen] = useState(false);
+
   useEffect(() => { setLocalProject(project); }, [project.id]);
   const handleUpdate = (updates: Partial<Project>) => { 
     const updated = { ...localProject, ...updates }; 
     setLocalProject(updated); 
     onSave(updated); 
   };
+
   const handleFilesUploaded = (newTables: Table[]) => { 
-    const mergedTables = [...localProject.state.tables, ...newTables]; 
-    handleUpdate({ state: { ...localProject.state, tables: mergedTables } }); 
+    const existingTables = [...localProject.state.tables];
+    const finalTables = [...existingTables];
+
+    newTables.forEach(newTable => {
+      const existingIdx = finalTables.findIndex(t => t.name === newTable.name);
+      if (existingIdx >= 0) {
+        // Merge columns for the existing table
+        const existingTable = finalTables[existingIdx];
+        const mergedColumns = newTable.columns.map(newCol => {
+          const matchedExisting = existingTable.columns.find(ec => ec.name === newCol.name);
+          // If the column exists, keep its previous state (rules, type, ID)
+          // If it's new, use the newCol (detected settings)
+          return matchedExisting ? matchedExisting : newCol;
+        });
+        finalTables[existingIdx] = { ...existingTable, columns: mergedColumns };
+      } else {
+        finalTables.push(newTable);
+      }
+    });
+
+    handleUpdate({ state: { ...localProject.state, tables: finalTables } }); 
   };
+
   const handleReferenceFilesUploaded = (newRefs: ReferenceFile[]) => {
-    const mergedRefs = [...(localProject.state.referenceFiles || []), ...newRefs];
-    handleUpdate({ state: { ...localProject.state, referenceFiles: mergedRefs } });
+    const existingRefs = [...(localProject.state.referenceFiles || [])];
+    const finalRefs = [...existingRefs];
+
+    newRefs.forEach(newRef => {
+      const existingIdx = finalRefs.findIndex(r => r.name === newRef.name);
+      if (existingIdx >= 0) {
+        // Overwrite the existing reference file with new values
+        finalRefs[existingIdx] = { ...finalRefs[existingIdx], values: newRef.values };
+      } else {
+        finalRefs.push(newRef);
+      }
+    });
+
+    handleUpdate({ state: { ...localProject.state, referenceFiles: finalRefs } });
   };
+
   const handleDeleteReferenceFile = (id: string) => {
     const updatedRefs = (localProject.state.referenceFiles || []).filter(rf => rf.id !== id);
     handleUpdate({ state: { ...localProject.state, referenceFiles: updatedRefs } });
@@ -1279,6 +1759,10 @@ const Editor = ({ project, onSave, onBack }: { project: Project, onSave: (p: Pro
     handleUpdate({ state: { ...localProject.state, canvasScroll: { x, y } } }); 
   };
   
+  const handleUpdateActors = (updatedActors: Actor[]) => {
+    handleUpdate({ state: { ...localProject.state, actors: updatedActors } });
+  };
+
   const syncTableRules = (tables: Table[], rel: Relationship): Table[] => {
     // Both 1:1 and 1:N imply the source column is a link to the target
     if (rel.cardinality === 'N:M') return tables;
@@ -1322,17 +1806,23 @@ const Editor = ({ project, onSave, onBack }: { project: Project, onSave: (p: Pro
   const renderStep = () => {
     switch (localProject.currentStep) {
       case 1: return <FileUploadStep onFilesUploaded={handleFilesUploaded} onReferenceFilesUploaded={handleReferenceFilesUploaded} onDeleteReferenceFile={handleDeleteReferenceFile} onDeleteTable={handleDeleteTable} existingTables={localProject.state.tables} existingReferenceFiles={localProject.state.referenceFiles || []} />;
-      case 2: return <SchemaStep tables={localProject.state.tables} onUpdateTable={handleUpdateTable} />;
+      case 2: return <SchemaStep tables={localProject.state.tables} onUpdateTable={handleUpdateTable} actors={localProject.state.actors || []} onOpenActors={() => setIsActorsOpen(true)} />;
       case 3: return <RelationshipMapper tables={localProject.state.tables} relationships={localProject.state.relationships} canvasScroll={localProject.state.canvasScroll} projectName={localProject.name} onAddRelationship={handleAddRelationship} onRemoveRelationship={handleRemoveRelationship} onUpdateRelationship={handleUpdateRelationship} onUpdateTables={handleUpdateTables} onUpdateCanvasScroll={handleCanvasScroll} />;
       case 4: return <RulesConfiguration tables={localProject.state.tables} relationships={localProject.state.relationships} referenceFiles={localProject.state.referenceFiles || []} onUpdateTable={handleUpdateTable} />;
-      case 5: return <ExportPanel tables={localProject.state.tables} relationships={localProject.state.relationships} referenceFiles={localProject.state.referenceFiles || []} />;
+      case 5: return <ExportPanel tables={localProject.state.tables} relationships={localProject.state.relationships} referenceFiles={localProject.state.referenceFiles || []} actors={localProject.state.actors || []} />;
       default: return <div>Unknown Step</div>;
     }
   };
   return (
     <div className="flex flex-col h-screen bg-white">
-      <Navbar step={localProject.currentStep} projectName={localProject.name} onBack={onBack} onSave={() => onSave(localProject)} onStepChange={(step) => handleUpdate({ currentStep: step })} canNavigate={localProject.state.tables.length > 0} />
+      <Navbar step={localProject.currentStep} projectName={localProject.name} onBack={onBack} onSave={() => onSave(localProject)} onStepChange={(step) => handleUpdate({ currentStep: step })} canNavigate={localProject.state.tables.length > 0} onOpenActors={() => setIsActorsOpen(true)} />
       {renderStep()}
+      <ActorsModal 
+        isOpen={isActorsOpen} 
+        onClose={() => setIsActorsOpen(false)} 
+        actors={localProject.state.actors || []} 
+        onUpdateActors={handleUpdateActors} 
+      />
     </div>
   );
 };

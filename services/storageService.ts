@@ -45,7 +45,7 @@ export const createNewProject = (name: string): Project => {
     id: crypto.randomUUID(),
     name,
     lastModified: Date.now(),
-    state: { tables: [], relationships: [], referenceFiles: [] },
+    state: { tables: [], relationships: [], referenceFiles: [], actors: [] },
     currentStep: 1
   };
 };
