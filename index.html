@@ -6,10 +6,11 @@
     <title>Synthetic Data Forge</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
-    
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
     <script>
+      window.process = { env: { NODE_ENV: 'development' } };
+      
       tailwind.config = {
         theme: {
           extend: {
@@ -34,11 +35,14 @@
     "jszip": "https://esm.sh/jszip@^3.10.1",
     "papaparse": "https://esm.sh/papaparse@^5.4.1",
     "xlsx": "https://esm.sh/xlsx@^0.18.5",
-    "./types": "./src/types.ts",
-    "../services/generatorService": "./services/generatorService.ts",
-    "../services/storageService": "./services/storageService.ts",
-    "./Editor": "./src/Editor.tsx",
-    "./LifecycleManager": "./src/LifecycleManager.tsx",
+    "./src/App": "https://esm.sh/gh/adrianmharris1-prog/dummy-data-architect/src/App.tsx",
+    "./src/Editor": "https://esm.sh/gh/adrianmharris1-prog/dummy-data-architect/src/Editor.tsx",
+    "./src/Dashboard": "https://esm.sh/gh/adrianmharris1-prog/dummy-data-architect/src/Dashboard.tsx",
+    "./src/types": "https://esm.sh/gh/adrianmharris1-prog/dummy-data-architect/src/types.ts",
+    "./src/LifecycleManager": "https://esm.sh/gh/adrianmharris1-prog/dummy-data-architect/src/LifecycleManager.tsx",
+    "./types": "https://esm.sh/gh/adrianmharris1-prog/dummy-data-architect/src/types.ts",
+    "../services/generatorService": "https://esm.sh/gh/adrianmharris1-prog/dummy-data-architect/src/services/generatorService.ts",
+    "../services/storageService": "https://esm.sh/gh/adrianmharris1-prog/dummy-data-architect/src/services/storageService.ts",
     "react/": "https://esm.sh/react@^19.2.3/",
     "@google/genai": "https://esm.sh/@google/genai@^1.37.0"
   }
@@ -55,6 +59,14 @@
   <body>
     <div id="root"></div>
 
-    <script type="text/babel" data-type="module" src="index.tsx"></script>
+    <script type="text/babel" data-type="module">
+      import React from 'react';
+      import { createRoot } from 'react-dom';
+      import App from './src/App';
+      
+      const container = document.getElementById('root');
+      const root = createRoot(container);
+      root.render(<App />);
+    </script>
   </body>
 </html>

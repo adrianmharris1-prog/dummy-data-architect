@@ -9,8 +9,8 @@ import {
   ReferenceFile, 
   DateLogicConfig, 
   LifecyclePolicy 
-} from '../src/types.js';
-import { generateSyntheticDataBatch } from './geminiService.js';
+} from '../src/types';
+import { generateSyntheticDataBatch } from './geminiService';
 
 /**
  * --- TYPES & INTERFACES ---
