@@ -1,7 +1,6 @@
 
+// Fix: Use gemini-3-pro-preview for complex reasoning tasks like synthetic data generation with relational integrity
 import { GoogleGenAI, Type } from "@google/genai";
-
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 export const generateSyntheticDataBatch = async (
   prompt: string,
@@ -9,12 +8,14 @@ export const generateSyntheticDataBatch = async (
   exampleValues: string[] = [],
   contextValues: string[] = [] 
 ): Promise<string[]> => {
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+
   if (!process.env.API_KEY) {
     console.warn("No API Key found for Gemini");
     return Array(count).fill("API_KEY_MISSING");
   }
 
-  const model = 'gemini-3-flash-preview';
+  const model = 'gemini-3-pro-preview';
   
   const examplesText = exampleValues.length > 0 
     ? `Here are some examples of the desired data format/style: ${exampleValues.slice(0, 5).join(', ')}.` 
@@ -26,16 +27,19 @@ export const generateSyntheticDataBatch = async (
 
   const systemInstruction = `
     STRICT CONSTRAINTS:
-    1. ID PATTERNS: Analyze the 'id' and 'physicalid' columns in the provided samples. Identify the exact alphanumeric pattern. Generate new, unique IDs that follow this EXACT format.
+    1. ID PATTERNS: Analyze patterns in provided samples. Identify the exact alphanumeric pattern. Generate new, unique IDs that follow this EXACT format.
     2. RELATIONAL INTEGRITY: Only use provided context values for dependent fields.
-    3. DATA TYPES:
-       - 'originated' / 'modified': Generate ISO-8601 timestamps.
-       - 'owner' / 'name': Create realistic corporate usernames (e.g., jsmith, ddoe).
-    4. CREATIVE FIELDS: When the strategy is "AI Creative", generate professional-grade, realistic values. If context values are provided in the format "[Field: Value, ...]", ensure your generated output for that row is logically and semantically derived from those values (e.g., if context is John Doe, an email should be john.doe@company.com).
-    5. NO HALLUCINATION: If a column is defined as "Random (Dropdown)," do not introduce new values outside of the user-defined selection list.
+    3. DATA TYPES (3DEXPERIENCE standard):
+       - 'Integer': Generate whole numbers only (no decimal points).
+       - 'Real': Generate floating point numbers.
+       - 'Date': Generate ISO-8601 timestamps.
+       - 'Boolean': 'true' or 'false' (or 1/0 as appropriate for samples).
+       - 'String' / 'Text Area': Professional corporate language.
+       - 'Revision': Follow standard revision patterns (A.1, B.2, etc.) if samples suggest it.
+    4. CREATIVE FIELDS: When the strategy is "AI Creative", generate professional-grade, realistic values. If context values are provided, ensure your generated output for that row is logically derived from those values.
+    5. NO HALLUCINATION: If a column is defined as "Dropdown," do not introduce new values outside of the user-defined selection list if provided.
 
     You are a synthetic data generator. 
-    Your task is to generate realistic, diverse, professional-grade, and contextually appropriate data based on a user's column description and provided context.
     Return ONLY a JSON array of strings. Do not include markdown formatting or explanations.
     ${examplesText}
     ${contextText}

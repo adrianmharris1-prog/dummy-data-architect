@@ -1,6 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import App from './App';
+import App from './src/App'; // Explicitly pointing to the new src folder
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {

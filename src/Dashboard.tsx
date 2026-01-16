@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
-import { Plus, Trash2, Clock, Database, Network, Search, FolderOpen, AlertTriangle, X } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { Plus, Trash2, Clock, Database, Network, Search, FolderOpen, AlertTriangle, X, CloudUpload } from 'lucide-react';
 import { Project } from './types';
-import { createNewProject, deleteProject, saveProject } from './services/storageService';
+import { createNewProject, deleteProject, saveProject } from '../services/storageService';
+import JSZip from 'jszip';
 
 interface DashboardProps {
   projects: Project[];
@@ -14,6 +15,8 @@ export const Dashboard = ({ projects, onOpenProject, onProjectsChange }: Dashboa
   const [newProjectName, setNewProjectName] = useState('');
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [projectToDelete, setProjectToDelete] = useState<string | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
@@ -23,6 +26,49 @@ export const Dashboard = ({ projects, onOpenProject, onProjectsChange }: Dashboa
     saveProject(newProject);
     onProjectsChange();
     onOpenProject(newProject); 
+  };
+
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const zip = await JSZip.loadAsync(file);
+      const configFile = zip.file('project_config.json');
+      
+      if (!configFile) {
+        setImportError("Invalid snapshot: project_config.json not found.");
+        return;
+      }
+
+      const configText = await configFile.async('text');
+      const imported = JSON.parse(configText);
+
+      if (!imported.state) {
+        setImportError("Invalid project format in snapshot.");
+        return;
+      }
+
+      // Create a fresh project entry from the imported data
+      const restoredProject: Project = {
+        ...imported,
+        id: crypto.randomUUID(), // Assign new ID to prevent conflicts
+        lastModified: Date.now()
+      };
+
+      saveProject(restoredProject);
+      onProjectsChange();
+      onOpenProject(restoredProject);
+    } catch (err) {
+      console.error("Import failed", err);
+      setImportError("Failed to parse project ZIP.");
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
   };
 
   const handleDeleteClick = (e: React.MouseEvent) => {
@@ -54,7 +100,6 @@ export const Dashboard = ({ projects, onOpenProject, onProjectsChange }: Dashboa
     onOpenProject(project);
   };
 
-  // Create a sorted copy to avoid mutating props
   const sortedProjects = [...projects].sort((a, b) => b.lastModified - a.lastModified);
 
   return (
@@ -78,43 +123,60 @@ export const Dashboard = ({ projects, onOpenProject, onProjectsChange }: Dashboa
             
             <div className="flex items-center gap-2">
               {/* Create Button */}
-              <div className="relative group">
-                <button 
-                  type="button"
-                  onClick={() => setIsCreating(true)}
-                  className="p-2 text-slate-600 hover:text-primary hover:bg-blue-50 rounded-lg transition-colors"
-                  aria-label="Create New Project"
-                >
-                  <Plus size={20} className="pointer-events-none" />
-                </button>
-                <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 px-2 py-1 bg-slate-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50">
-                  Create New Project
-                </div>
-              </div>
+              <button 
+                onClick={() => setIsCreating(true)}
+                className="flex items-center gap-2 px-3 py-2 bg-primary text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors shadow-sm"
+              >
+                <Plus size={18} />
+                <span>New Project</span>
+              </button>
+
+              <div className="w-px h-6 bg-slate-200 mx-1"></div>
+
+              {/* Import Button */}
+              <input 
+                type="file" 
+                ref={fileInputRef} 
+                className="hidden" 
+                accept=".zip" 
+                onChange={handleFileImport} 
+              />
+              <button 
+                onClick={handleImportClick}
+                className="p-2 text-slate-600 hover:text-primary hover:bg-blue-50 rounded-lg transition-colors"
+                title="Restore Project from Snapshot (.zip)"
+              >
+                <CloudUpload size={20} />
+              </button>
 
               <div className="w-px h-6 bg-slate-200 mx-1"></div>
 
               {/* Delete Button */}
-              <div className="relative group">
-                <button 
-                  type="button"
-                  onClick={handleDeleteClick}
-                  disabled={!selectedProjectId}
-                  className={`p-2 rounded-lg transition-colors ${
-                    !selectedProjectId 
-                      ? 'text-slate-300 cursor-not-allowed' 
-                      : 'text-slate-600 hover:text-red-600 hover:bg-red-50'
-                  }`}
-                  aria-label="Delete Project"
-                >
-                  <Trash2 size={20} className="pointer-events-none" />
-                </button>
-                <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 px-2 py-1 bg-slate-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50">
-                  Delete Project
-                </div>
-              </div>
+              <button 
+                onClick={handleDeleteClick}
+                disabled={!selectedProjectId}
+                className={`p-2 rounded-lg transition-colors ${
+                  !selectedProjectId 
+                    ? 'text-slate-300 cursor-not-allowed' 
+                    : 'text-slate-600 hover:text-red-600 hover:bg-red-50'
+                }`}
+                title="Delete Project"
+              >
+                <Trash2 size={20} />
+              </button>
             </div>
           </div>
+
+          {/* Error Banner */}
+          {importError && (
+            <div className="bg-red-50 border-b border-red-100 px-6 py-2 flex items-center justify-between text-red-700 text-xs font-medium">
+              <div className="flex items-center gap-2">
+                <AlertTriangle size={14} />
+                {importError}
+              </div>
+              <button onClick={() => setImportError(null)}><X size={14} /></button>
+            </div>
+          )}
 
           {/* Table Container */}
           <div className="flex-1 overflow-auto">
@@ -134,12 +196,10 @@ export const Dashboard = ({ projects, onOpenProject, onProjectsChange }: Dashboa
                       <div className="flex flex-col items-center gap-3">
                         <FolderOpen size={48} className="text-slate-200" />
                         <p>No projects found.</p>
-                        <button 
-                          onClick={() => setIsCreating(true)}
-                          className="text-primary hover:underline text-sm font-medium"
-                        >
-                          Create your first project
-                        </button>
+                        <div className="flex gap-4">
+                          <button onClick={() => setIsCreating(true)} className="text-primary hover:underline text-sm font-medium">Create New</button>
+                          <button onClick={handleImportClick} className="text-slate-600 hover:underline text-sm font-medium">Restore Snapshot</button>
+                        </div>
                       </div>
                     </td>
                   </tr>

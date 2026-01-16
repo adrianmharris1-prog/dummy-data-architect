@@ -1,7 +1,7 @@
-
-import { Project } from '../types';
+import { Project } from '../src/types';
 
 const STORAGE_KEY = 'synthetic_forge_projects';
+const SETTINGS_KEY = 'synthetic_forge_settings';
 
 export const getProjects = (): Project[] => {
   try {
@@ -48,4 +48,12 @@ export const createNewProject = (name: string): Project => {
     state: { tables: [], relationships: [], referenceFiles: [], actors: [] },
     currentStep: 1
   };
+};
+
+export const getGlobalDateFormat = (): string => {
+  return localStorage.getItem(`${SETTINGS_KEY}_date_format`) || 'YYYY-MM-DD';
+};
+
+export const saveGlobalDateFormat = (format: string) => {
+  localStorage.setItem(`${SETTINGS_KEY}_date_format`, format);
 };

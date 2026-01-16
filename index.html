@@ -1,11 +1,14 @@
-
 <!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Synthetic Data Forge</title>
+    
     <script src="https://cdn.tailwindcss.com"></script>
+    
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
     <script>
       tailwind.config = {
         theme: {
@@ -19,40 +22,39 @@
         }
       }
     </script>
-    <style>
-      /* Minimal scrollbar override for cleaner UI in tables */
-      ::-webkit-scrollbar {
-        width: 8px;
-        height: 8px;
-      }
-      ::-webkit-scrollbar-track {
-        background: #f1f5f9;
-      }
-      ::-webkit-scrollbar-thumb {
-        background: #cbd5e1;
-        border-radius: 4px;
-      }
-      ::-webkit-scrollbar-thumb:hover {
-        background: #94a3b8;
-      }
-    </style>
-  <script type="importmap">
+
+    <script type="importmap">
 {
   "imports": {
-    "@google/genai": "https://esm.sh/@google/genai@^1.34.0",
-    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
-    "react/": "https://esm.sh/react@^19.2.3/",
     "react": "https://esm.sh/react@^19.2.3",
+    "react-dom": "https://esm.sh/react-dom@^19.2.3",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
     "lucide-react": "https://esm.sh/lucide-react@^0.562.0",
     "file-saver": "https://esm.sh/file-saver@^2.0.5",
     "jszip": "https://esm.sh/jszip@^3.10.1",
-    "papaparse": "https://esm.sh/papaparse@^5.5.3",
-    "xlsx": "https://esm.sh/xlsx@0.18.5"
+    "papaparse": "https://esm.sh/papaparse@^5.4.1",
+    "xlsx": "https://esm.sh/xlsx@^0.18.5",
+    "./types": "./src/types.ts",
+    "../services/generatorService": "./services/generatorService.ts",
+    "../services/storageService": "./services/storageService.ts",
+    "./Editor": "./src/Editor.tsx",
+    "./LifecycleManager": "./src/LifecycleManager.tsx",
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "@google/genai": "https://esm.sh/@google/genai@^1.37.0"
   }
 }
 </script>
-</head>
-  <body class="bg-slate-50 text-slate-900 font-sans antialiased overflow-hidden">
-    <div id="root" class="h-screen w-screen flex flex-col"></div>
+
+    <style>
+      ::-webkit-scrollbar { width: 8px; height: 8px; }
+      ::-webkit-scrollbar-track { background: #f1f5f9; }
+      ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+      ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <script type="text/babel" data-type="module" src="index.tsx"></script>
   </body>
 </html>
