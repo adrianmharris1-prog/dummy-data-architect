@@ -9,18 +9,16 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
     <script>
-      window.process = { env: { NODE_ENV: 'development' } };
+      // FIX: Fakes the environment so the services don't crash
+      window.process = { 
+        env: { 
+          NODE_ENV: 'development',
+          API_KEY: 'YOUR_GEMINI_KEY_HERE' // Put your key here if you use Gemini
+        } 
+      };
       
       tailwind.config = {
-        theme: {
-          extend: {
-            colors: {
-              primary: '#2563eb',
-              secondary: '#475569',
-              accent: '#8b5cf6',
-            }
-          }
-        }
+        theme: { extend: { colors: { primary: '#2563eb', secondary: '#475569', accent: '#8b5cf6' } } }
       }
     </script>
 
@@ -29,7 +27,7 @@
   "imports": {
     "react": "https://esm.sh/react@^19.2.3",
     "react-dom": "https://esm.sh/react-dom@^19.2.3",
-    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "react-dom/client": "https://esm.sh/react-dom@^19.2.3/client",
     "lucide-react": "https://esm.sh/lucide-react@^0.562.0",
     "file-saver": "https://esm.sh/file-saver@^2.0.5",
     "jszip": "https://esm.sh/jszip@^3.10.1",
@@ -39,33 +37,26 @@
     "./src/Editor": "https://esm.sh/gh/adrianmharris1-prog/dummy-data-architect/src/Editor.tsx",
     "./src/Dashboard": "https://esm.sh/gh/adrianmharris1-prog/dummy-data-architect/src/Dashboard.tsx",
     "./src/types": "https://esm.sh/gh/adrianmharris1-prog/dummy-data-architect/src/types.ts",
-    "./src/LifecycleManager": "https://esm.sh/gh/adrianmharris1-prog/dummy-data-architect/src/LifecycleManager.tsx",
     "./types": "https://esm.sh/gh/adrianmharris1-prog/dummy-data-architect/src/types.ts",
+    "../src/types": "https://esm.sh/gh/adrianmharris1-prog/dummy-data-architect/src/types.ts",
     "../services/generatorService": "https://esm.sh/gh/adrianmharris1-prog/dummy-data-architect/src/services/generatorService.ts",
     "../services/storageService": "https://esm.sh/gh/adrianmharris1-prog/dummy-data-architect/src/services/storageService.ts",
     "react/": "https://esm.sh/react@^19.2.3/",
-    "@google/genai": "https://esm.sh/@google/genai@^1.37.0"
+    "@google/genai": "https://esm.sh/@google/genai@^1.37.0",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/"
   }
 }
 </script>
-
-    <style>
-      ::-webkit-scrollbar { width: 8px; height: 8px; }
-      ::-webkit-scrollbar-track { background: #f1f5f9; }
-      ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
-      ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
-    </style>
   </head>
   <body>
     <div id="root"></div>
 
     <script type="text/babel" data-type="module">
       import React from 'react';
-      import { createRoot } from 'react-dom';
+      import { createRoot } from 'react-dom/client';
       import App from './src/App';
       
-      const container = document.getElementById('root');
-      const root = createRoot(container);
+      const root = createRoot(document.getElementById('root'));
       root.render(<App />);
     </script>
   </body>
